@@ -1,1 +1,1 @@
-pip install typing
+typing>=3.6
