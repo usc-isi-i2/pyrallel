@@ -167,8 +167,9 @@ class ParallelProcessor(object):
                 for d in data[1]:
                     args, kwargs = d[0], d[1]
                     # print(idx, 'data')
-                    result = self.input_handler(*args, **kwargs, _idx=idx) if self.enable_process_id \
-                        else self.input_handler(*args, **kwargs)
+                    if self.enable_process_id:
+                        kwargs['_idx'] = idx
+                    result = self.input_handler(*args, **kwargs)
                     if self.output_handler:
                         if not isinstance(result, tuple):  # output must represent as tuple
                             result = (result,)
