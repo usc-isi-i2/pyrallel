@@ -1,6 +1,8 @@
 Paralyzer
 =========
 
+.. begin-intro
+
 Yet another easy-to-use python parallel library for humans.
 
 .. image:: https://img.shields.io/badge/license-MIT-blue.svg
@@ -19,6 +21,7 @@ Yet another easy-to-use python parallel library for humans.
     :target: http://paralyzer.readthedocs.io/en/latest
     :alt: Documents
 
+.. end-intro
 
 Installation
 ------------
