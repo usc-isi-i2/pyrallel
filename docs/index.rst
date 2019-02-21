@@ -13,8 +13,8 @@ Installation
 
    installation.rst
 
-API Reference
--------------
+Modules
+-------
 
 .. toctree::
    :maxdepth: 3
