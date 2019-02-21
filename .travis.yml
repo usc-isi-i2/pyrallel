@@ -12,9 +12,14 @@ python:
 install:
   - pip install -r requirements.txt
   - pip install -r requirements-dev.txt
+  - pip install -e .
+  - pip install coveralls
 
 script:
-- pytest -v --color=yes
+  - pytest -v --color=yes --cov paralyzer
+
+after_success:
+  - coveralls
 
 notifications:
   email: false

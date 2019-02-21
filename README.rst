@@ -13,6 +13,10 @@ Yet another easy-to-use python parallel library for humans.
     :target: https://travis-ci.org/usc-isi-i2/paralyzer
     :alt: Travis
 
+.. image:: https://coveralls.io/repos/github/usc-isi-i2/paralyzer/badge.svg?branch=master
+    :target: https://coveralls.io/github/usc-isi-i2/paralyzer?branch=master
+    :alt: Coveralls
+
 .. image:: https://badge.fury.io/py/paralyzer.svg
     :target: https://badge.fury.io/py/paralyzer
     :alt: pypi
