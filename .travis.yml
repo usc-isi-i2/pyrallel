@@ -1,0 +1,28 @@
+language: python
+
+python:
+  - '3.7-dev'
+  - '3.6'
+  - '3.6-dev'
+  - '3.5'
+  - '3.5-dev'
+  - '3.4'
+  - '3.3'
+
+install:
+  - pip install -r requirements.txt
+  - pip install -r requirements-dev.txt
+
+script:
+- pytest -v --color=yes
+
+notifications:
+  email: false
+
+deploy:
+  - provider: pypi
+    user: usc_isi_i2_admin
+    password:
+      secure: V6dJfisLo8Qm9EuGiHOYLtmcpG63fscIW8h4zVyBVI5aqxq19pxWU8517z6BaAF5sGAvVXFrpEULK3slKm0gyA8OOZ3CCNyzAQAUhvj4j+GuDqRj/neHZeGrlu/inzi0por0Fg/AgjdT4d9zhJdVRclwm8uVqd+1EJyBY8OudaKiOuNz13jYOPU6bM/YytaL4kntX7NUFSOpks2++8HVj6SKc2oQ9f46jC2IeLyPhBZXSbsi3M85acvkW4bnjw51EXqSU1AAF4/aNHCW/sswWOhgvOCIPP2Vt/JfXE8sy4aV6vaun0u5/TLx6EJB6k0sFKxjezmRhraBp5n7z3KXkP5jr2t9XYQYWAU4OuAQ+MWfowHkjUaIbccZo6xnlBqBZvAArcfZoyN3s1nItGdSjZYezWu2/tiqJTha1k6+04hfaKyLjDFAvJLiIS9M3HJaaFgtLi1lCTVlHpoeqp3JUViEy4sKM7o+ihB9w4tS1XiB4bshHOEFuLAgvTqtQ3NPtZPsj7RsZpC6kpRtapAhdMnBe0+QhHVIQAVQ7uTmdaFPe5gBhU5KB/6dMst3oB2vdDY85guAyUgv6t6f3zADNMZJwIEuvtsBY3KzK2oa1MhicLL2U+HofVBPX7tNkO9eFNJDOIhhm/CoLUgLgCuQp507qRRxo4RMqx3pvceDsJI=
+    on:
+      tags: true
