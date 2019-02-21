@@ -1,1 +1,1 @@
-from paralyzer.parallel_prosessor import ParallelProcessor
+from paralyzer.parallel_processor import ParallelProcessor
