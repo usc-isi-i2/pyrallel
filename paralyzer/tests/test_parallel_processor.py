@@ -1,17 +1,21 @@
 import time
+import multiprocessing as mp
 
 from paralyzer.parallel_processor import ParallelProcessor
+
+
+NUM_OF_PROCESSOR = min(2, int(mp.cpu_count() / 2))
 
 
 def test_basic():
     def dummy_computation():
         time.sleep(0.0001)
 
-    pp = ParallelProcessor(dummy_computation, 8)
+    pp = ParallelProcessor(NUM_OF_PROCESSOR, dummy_computation)
     pp.start()
 
     for i in range(1000):
-        pp.compute()
+        pp.add_task()
 
     pp.task_done()
     pp.join()
@@ -21,11 +25,13 @@ def test_with_input():
     def dummy_computation_with_input(x):
         time.sleep(0.0001)
 
-    pp = ParallelProcessor(dummy_computation_with_input, 8)
+    pp = ParallelProcessor(NUM_OF_PROCESSOR, dummy_computation_with_input)
     pp.start()
 
     for i in range(1000):
-        pp.compute(i)
+        pp.add_task(i)
+
+    pp.map(range(1000))
 
     pp.task_done()
     pp.join()
@@ -36,11 +42,13 @@ def test_with_multiple_input():
         assert x * 2 == y
         time.sleep(0.0001)
 
-    pp = ParallelProcessor(dummy_computation_with_input, 8)
+    pp = ParallelProcessor(NUM_OF_PROCESSOR, dummy_computation_with_input)
     pp.start()
 
     for i in range(1000):
-        pp.compute(i, y=i*2)
+        pp.add_task(i, y=i*2)
+
+    pp.map([(i, i*2) for i in range(1000)])
 
     pp.task_done()
     pp.join()
@@ -53,14 +61,14 @@ def test_with_output():
         time.sleep(0.0001)
         return x * x
 
-    def output_handler(r):
+    def collector(r):
         result.append(r)
 
-    pp = ParallelProcessor(dummy_computation_with_input, 8, output_handler=output_handler)
+    pp = ParallelProcessor(NUM_OF_PROCESSOR, dummy_computation_with_input, collector=collector)
     pp.start()
 
     for i in range(8):
-        pp.compute(i)
+        pp.add_task(i)
 
     pp.task_done()
     pp.join()
@@ -76,14 +84,14 @@ def test_with_multiple_output():
         time.sleep(0.0001)
         return x * x, x * x
 
-    def output_handler(r1, r2):
+    def collector(r1, r2):
         result.append(r1)
 
-    pp = ParallelProcessor(dummy_computation_with_input, 8, output_handler=output_handler)
+    pp = ParallelProcessor(NUM_OF_PROCESSOR, dummy_computation_with_input, collector=collector)
     pp.start()
 
     for i in range(8):
-        pp.compute(i)
+        pp.add_task(i)
 
     pp.task_done()
     pp.join()
