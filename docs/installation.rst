@@ -3,7 +3,7 @@ Installation
 
 .. note::
 
-    RLTK only supports Python 3 and it's tested under Python 3.3+.
+    Paralyzer only supports Python 3 and it's tested under Python 3.3+.
 
 pip
 ----
@@ -12,31 +12,29 @@ Using pip to install::
 
     pip install paralyzer
 
-If you want to update RLTK::
+If you want to update installed Paralyzer::
 
     pip install -U paralyzer
 
-Generally, it's recommended to install packages in a virtual environment::
-
-    virtualenv rltk_env
-    source activate rltk_env
-    pip install paralyzer
-
+Development installation
+------------------------
 
 Install from source
--------------------
+```````````````````
 
-The other way to install Paralyzer is to clone from GitHub repository and build it from source::
+::
 
     git clone https://github.com/usc-isi-i2/paralyzer.git
-    cd rltk
+    cd paralyzer
 
-    virtualenv rltk_env
-    source activate rltk_env
+    virtualenv paralyzer_env
+    source activate paralyzer_env
+    pip install -r requirements.txt
+    pip install -r requreiments-dev.txt
     pip install -e .
 
 Run tests
----------
+`````````
 
 Paralyzer uses `pytest <https://pytest.org/>`_ for unit tests. To run them, simply do following command from the root of paralyzer package::
 
@@ -49,7 +47,7 @@ If you need more detailed information, do::
 Build documentation
 -------------------
 
-Additional dependencies for building documentation should be installed first:
+Additional dependencies for building documentation should be installed first::
 
     pip install -r requirements-docs.txt
 
