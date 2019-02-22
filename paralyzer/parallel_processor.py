@@ -1,28 +1,74 @@
 """
-This module is designed for breaking the restriction of Python Global Interpreter Lock (GIL): It uses multi-processing (add_task-intensive operations) and multi-threading (return data collecting) to accelerate computing.
-Once it's initialized, it creates a sub process pool, all the added data will be dispatched to different sub processes for parallel computing. The result sends back and consumes in another thread in current main process. The Inter Process Communication (IPC) between main process and sub processes is based on queue.
+ParallelProcessor utilizes multiple CPU cores to process compute-intensive tasks.
 
-Example::
 
-    result = []
+If you have a some time-consuming statements in a for-loop and no state is shared among loops, you can map these
+statements to different processes. Assume you need to process couple of files, you can do this in parallel::
 
-    def dummy_computation_with_mapper(x):
-        time.sleep(0.0001)
-        return x * x, x + 5
+    def mapper(filename):
+        with open(filename) as f_in, open(filename + '.out') as f_out:
+            f_out.write(process_a_file(f_in.read()))
 
-    def collector(r1, r2):
-        result.append(r1 if r1 > r2 else r2)
-
-    pp = ParallelProcessor(dummy_computation_with_mapper, 8, collector=collector)
+    pp = ParallelProcessor(2, mapper)
     pp.start()
 
-    for i in range(8):
-        pp.add_task(i)
+    for fname in ['file1', 'file2', 'file3', 'file4']:
+        pp.add_task(fname)
 
     pp.task_done()
     pp.join()
 
-    print(result)
+It's not required to have a loop statement if you have iterable object or type (list, generator, etc),
+use a shortcut instead::
+
+    pp = ParallelProcessor(2, mapper)
+    pp.start()
+
+    pp.map(['file1', 'file2', 'file3', 'file4'])
+
+    pp.task_done()
+    pp.join()
+
+Usually, some files are small and some are big, it would be better if it can keep all cores busy.
+One way is to send line by line to each processes (assume their contents are all line-separated)::
+
+    def mapper(line, _idx):
+        with open('processed_{}.out'.remote(_idx), 'a') as f_out:
+            f_out.write(process_a_line(line))
+
+    pp = ParallelProcessor(2, mapper, enable_process_id=True)
+    pp.start()
+
+    for fname in ['file1', 'file2', 'file3', 'file4']:
+        with open(fname) as f_in:
+            for line in f_in:
+                pp.add_task(line)
+
+    pp.task_done()
+    pp.join()
+
+In some situations, you may need to use `collector` to collect data back from child processes to main process::
+
+    processed = []
+
+    def mapper(line):
+        return process_a_line(line)
+
+    def collector(data):
+        processed.append(data)
+
+    pp = ParallelProcessor(2, mapper, collector=collector)
+    pp.start()
+
+    for fname in ['file1', 'file2', 'file3', 'file4']:
+        with open(fname) as f_in:
+            for line in f_in:
+                pp.add_task(line)
+
+    pp.task_done()
+    pp.join()
+
+    print(processed)
 """
 
 import multiprocessing as mp
@@ -68,7 +114,8 @@ class ParallelProcessor(object):
 
 
     Note:
-        Do NOT implement heavy add_task-intensive operations in collector, they should be in mapper.
+        - Do NOT implement heavy compute-intensive operations in collector, they should be in mapper.
+        - Tune the value for queue size and batch size will optimize performance a lot.
     """
 
     # Command format in queue. Represent in tuple.
