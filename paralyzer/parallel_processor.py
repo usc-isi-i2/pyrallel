@@ -33,7 +33,7 @@ Usually, some files are small and some are big, it would be better if it can kee
 One way is to send line by line to each processes (assume their contents are all line-separated)::
 
     def mapper(line, _idx):
-        with open('processed_{}.out'.remote(_idx), 'a') as f_out:
+        with open('processed_{}.out'.format(_idx), 'a') as f_out:
             f_out.write(process_a_line(line))
 
     pp = ParallelProcessor(2, mapper, enable_process_id=True)
@@ -74,7 +74,29 @@ In some situations, you may need to use `collector` to collect data back from ch
 import multiprocessing as mp
 import threading
 import queue
+import inspect
 from typing import Callable, Iterable
+
+
+class Mapper(object):
+    def __init__(self, idx):
+        self._idx = idx
+
+    def __enter__(self):
+        self.enter()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.exit(exc_type, exc_val, exc_tb)
+
+    def enter(self):
+        pass
+
+    def exit(self, *args, **kwargs):
+        pass
+
+    def process(self, *args, **kwargs):
+        raise NotImplementedError
 
 
 class CollectorThread(threading.Thread):
@@ -132,7 +154,18 @@ class ParallelProcessor(object):
         self.collector_queues = [mp.Queue(maxsize=max_size_per_collector_queue) for _ in range(num_of_processor)]
         self.processes = [mp.Process(target=self.run, args=(i, self.mapper_queues[i], self.collector_queues[i]))
                           for i in range(num_of_processor)]
-        self.mapper = mapper
+
+        ctx = self
+        if not inspect.isclass(mapper) or not issubclass(mapper, Mapper):
+            class DefaultMapper(Mapper):
+                def process(self, *args, **kwargs):
+                    if ctx.enable_process_id:
+                        kwargs['_idx'] = self._idx
+                    return mapper(*args, **kwargs)
+            self.mapper = DefaultMapper
+        else:
+            self.mapper = mapper
+
         self.collector = collector
         self.mapper_queue_index = 0
         self.collector_queue_index = 0
@@ -212,28 +245,27 @@ class ParallelProcessor(object):
         Process’s activity. It handles queue IO and invokes user's mapper handler.
         (subprocess, blocked, only two queues can be used to communicate with main process)
         """
-        while True:
-            data = mapper_queue.get()
-            if data[0] == ParallelProcessor.CMD_STOP:
-                # print(idx, 'stop')
-                if self.collector:
-                    collector_queue.put((ParallelProcessor.CMD_STOP,))
-                return
-            elif data[0] == ParallelProcessor.CMD_DATA:
-                batch_result = []
-                for d in data[1]:
-                    args, kwargs = d[0], d[1]
-                    # print(idx, 'data')
-                    if self.enable_process_id:
-                        kwargs['_idx'] = idx
-                    result = self.mapper(*args, **kwargs)
+        with self.mapper(idx) as mapper:
+            while True:
+                data = mapper_queue.get()
+                if data[0] == ParallelProcessor.CMD_STOP:
+                    # print(idx, 'stop')
                     if self.collector:
-                        if not isinstance(result, tuple):  # collector must represent as tuple
-                            result = (result,)
-                        batch_result.append(result)
-                if len(batch_result) > 0:
-                    collector_queue.put((ParallelProcessor.CMD_DATA, batch_result))
-                    batch_result = []  # reset buffer
+                        collector_queue.put((ParallelProcessor.CMD_STOP,))
+                    return
+                elif data[0] == ParallelProcessor.CMD_DATA:
+                    batch_result = []
+                    for d in data[1]:
+                        args, kwargs = d[0], d[1]
+                        # print(idx, 'data')
+                        result = mapper.process(*args, **kwargs)
+                        if self.collector:
+                            if not isinstance(result, tuple):  # collector must represent as tuple
+                                result = (result,)
+                            batch_result.append(result)
+                    if len(batch_result) > 0:
+                        collector_queue.put((ParallelProcessor.CMD_DATA, batch_result))
+                        batch_result = []  # reset buffer
 
     def collect(self):
         """
