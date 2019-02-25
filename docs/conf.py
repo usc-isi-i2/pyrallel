@@ -46,7 +46,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = 'pyrallel'
+project = 'Pyrallel'
 copyright = '{}, USC/ISI'.format(datetime.datetime.now().year)
 author = 'USC/ISI'
 
@@ -155,7 +155,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'pyrallel.tex', 'pyrallel Documentation',
+    (master_doc, 'pyrallel.tex', 'Pyrallel Documentation',
      u'USC/ISI', 'manual'),
 ]
 
@@ -165,7 +165,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'pyrallel', 'pyrallel Documentation',
+    (master_doc, 'Pyrallel', 'Pyrallel Documentation',
      [author], 1)
 ]
 
@@ -176,8 +176,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'pyrallel', 'pyrallel Documentation',
-     author, 'pyrallel', 'Yet another easy-to-use python3 parallel library for humans.',
+    (master_doc, 'Pyrallel', 'Pyrallel Documentation',
+     author, 'Pyrallel', 'Yet another easy-to-use python3 parallel library for humans.',
      'Miscellaneous'),
 ]
 
