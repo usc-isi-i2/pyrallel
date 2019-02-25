@@ -1,7 +1,7 @@
 import time
 import multiprocessing as mp
 
-from paralyzer.parallel_processor import ParallelProcessor
+from paralyzer.parallel_processor import ParallelProcessor, Mapper
 
 
 NUM_OF_PROCESSOR = min(2, int(mp.cpu_count() / 2))
@@ -12,6 +12,23 @@ def test_basic():
         time.sleep(0.0001)
 
     pp = ParallelProcessor(NUM_OF_PROCESSOR, dummy_computation)
+    pp.start()
+
+    for i in range(1000):
+        pp.add_task()
+
+    pp.task_done()
+    pp.join()
+
+    class MyMapper(Mapper):
+        def enter(self):
+            self.i = 0
+
+        def process(self):
+            dummy_computation()
+            self.i += 1
+
+    pp = ParallelProcessor(NUM_OF_PROCESSOR, MyMapper)
     pp.start()
 
     for i in range(1000):
@@ -32,6 +49,19 @@ def test_with_input():
         pp.add_task(i)
 
     pp.map(range(1000))
+
+    pp.task_done()
+    pp.join()
+
+    class MyMapper(Mapper):
+        def process(self, x):
+            dummy_computation_with_input(x)
+
+    pp = ParallelProcessor(NUM_OF_PROCESSOR, MyMapper)
+    pp.start()
+
+    for i in range(1000):
+        pp.add_task(i)
 
     pp.task_done()
     pp.join()
