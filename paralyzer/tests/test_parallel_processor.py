@@ -39,10 +39,10 @@ def test_basic():
 
 
 def test_with_input():
-    def dummy_computation_with_input(x):
+    def dummy_computation_with_input(x, _idx):
         time.sleep(0.0001)
 
-    pp = ParallelProcessor(NUM_OF_PROCESSOR, dummy_computation_with_input)
+    pp = ParallelProcessor(NUM_OF_PROCESSOR, dummy_computation_with_input, enable_process_id=True)
     pp.start()
 
     for i in range(1000):
@@ -55,7 +55,7 @@ def test_with_input():
 
     class MyMapper(Mapper):
         def process(self, x):
-            dummy_computation_with_input(x)
+            dummy_computation_with_input(x, _idx=self._idx)
 
     pp = ParallelProcessor(NUM_OF_PROCESSOR, MyMapper)
     pp.start()
