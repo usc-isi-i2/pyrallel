@@ -21,14 +21,14 @@ with open('requirements.txt', 'r') as f:
 packages = find_packages()
 
 setup(
-    name='paralyzer',
+    name='pyrallel',
     version=version,
     packages=packages,
-    url='https://github.com/usc-isi-i2/paralyzer',
+    url='https://github.com/usc-isi-i2/pyrallel',
     project_urls={
-        "Bug Tracker": "https://github.com/usc-isi-i2/paralyzer/issues",
-        "Documentation": "https://paralyzer.readthedocs.io",
-        "Source Code": "https://github.com/usc-isi-i2/paralyzer",
+        "Bug Tracker": "https://github.com/usc-isi-i2/pyrallel/issues",
+        "Documentation": "https://pyrallel.readthedocs.io",
+        "Source Code": "https://github.com/usc-isi-i2/pyrallel",
     },
     license='MIT',
     author='USC/ISI',

@@ -3,18 +3,18 @@ Installation
 
 .. note::
 
-    Paralyzer only supports Python 3 and it's tested under Python 3.3+.
+    Pyrallel supports Python 3 and it's tested under Python 3.3+.
 
 pip
 ----
 
 Using pip to install::
 
-    pip install paralyzer
+    pip install pyrallel
 
-If you want to update installed Paralyzer::
+If you want to update installed Pyrallel::
 
-    pip install -U paralyzer
+    pip install -U pyrallel
 
 Development installation
 ------------------------
@@ -24,11 +24,11 @@ Install from source
 
 ::
 
-    git clone https://github.com/usc-isi-i2/paralyzer.git
-    cd paralyzer
+    git clone https://github.com/usc-isi-i2/pyrallel.git
+    cd paraly
 
-    virtualenv paralyzer_env
-    source activate paralyzer_env
+    virtualenv pyrallel_env
+    source activate pyrallel_env
     pip install -r requirements.txt
     pip install -r requreiments-dev.txt
     pip install -e .
@@ -36,7 +36,7 @@ Install from source
 Run tests
 `````````
 
-Paralyzer uses `pytest <https://pytest.org/>`_ for unit tests. To run them, simply do following command from the root of paralyzer package::
+Pyrallel uses `pytest <https://pytest.org/>`_ for unit tests. To run them, simply do following command from the root of Pyrallel package::
 
     pytest
 

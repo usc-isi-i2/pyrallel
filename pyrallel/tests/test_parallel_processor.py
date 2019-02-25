@@ -1,7 +1,7 @@
 import time
 import multiprocessing as mp
 
-from paralyzer.parallel_processor import ParallelProcessor, Mapper
+from pyrallel.parallel_processor import ParallelProcessor, Mapper
 
 
 NUM_OF_PROCESSOR = min(2, int(mp.cpu_count() / 2))
