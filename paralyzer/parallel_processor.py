@@ -47,6 +47,20 @@ One way is to send line by line to each processes (assume their contents are all
     pp.task_done()
     pp.join()
 
+One problem here is you need to acquire file descriptor every time the mapper is called.
+To avoid this, use Mapper class instead.
+It can be used to deal with the how process is constructed and deconstructed::
+
+    class MyMapper(Mapper):
+        def enter(self):
+            self.f = open('processed_{}.out'.format(self._idx), 'w')
+
+        def exit(self, *args, **kwargs):
+            self.f.close()
+
+        def process(self, line):
+            self.f.write(process_a_line(line))
+
 In some situations, you may need to use `collector` to collect data back from child processes to main process::
 
     processed = []
@@ -79,6 +93,15 @@ from typing import Callable, Iterable
 
 
 class Mapper(object):
+    """
+    Mapper class.
+
+    This defines how mapper works.
+
+    The methods will be called in following order::
+
+        enter (one time) -> process (many times) -> exit (one time)
+    """
     def __init__(self, idx):
         self._idx = idx
 
@@ -90,12 +113,21 @@ class Mapper(object):
         self.exit(exc_type, exc_val, exc_tb)
 
     def enter(self):
+        """
+        Invoked when subprocess is created and listening the queue.
+        """
         pass
 
     def exit(self, *args, **kwargs):
+        """
+        Invoked when subprocess is going to exit. Arguments will be set if exception occurred.
+        """
         pass
 
     def process(self, *args, **kwargs):
+        """
+        Same as mapper function, but `self` argument can provide additional context (e.g., `self._idx`).
+        """
         raise NotImplementedError
 
 
@@ -120,7 +152,7 @@ class ParallelProcessor(object):
     """
     Args:
         num_of_processor (int): Number of processes to use.
-        mapper (Callable): Computational function.
+        mapper (Callable / Mapper): Function or subclass of `Mapper` class.
         max_size_per_mapper_queue (int, optional): Maximum size of mapper queue for one process.
                                     If it's full, the corresponding process will be blocked.
                                     0 by default means unlimited.
@@ -131,13 +163,15 @@ class ParallelProcessor(object):
                                     If it's full, the corresponding process will be blocked.
                                     0 by default means unlimited.
         enable_process_id (bool, optional): If it's true, an additional argument `_idx` (process id) will be
-                                passed to `mapper`. It defaults to False.
+                                passed to `mapper` function. This has no effect for `Mapper` class.
+                                It defaults to False.
         batch_size (int, optional): Batch size, defaults to 1.
 
 
     Note:
         - Do NOT implement heavy compute-intensive operations in collector, they should be in mapper.
         - Tune the value for queue size and batch size will optimize performance a lot.
+        - `collector` only collects returns from `mapper` or `Mapper.process`.
     """
 
     # Command format in queue. Represent in tuple.
@@ -152,7 +186,7 @@ class ParallelProcessor(object):
         self.num_of_processor = num_of_processor
         self.mapper_queues = [mp.Queue(maxsize=max_size_per_mapper_queue) for _ in range(num_of_processor)]
         self.collector_queues = [mp.Queue(maxsize=max_size_per_collector_queue) for _ in range(num_of_processor)]
-        self.processes = [mp.Process(target=self.run, args=(i, self.mapper_queues[i], self.collector_queues[i]))
+        self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[i], self.collector_queues[i]))
                           for i in range(num_of_processor)]
 
         ctx = self
@@ -240,7 +274,7 @@ class ParallelProcessor(object):
             except queue.Full:
                 continue  # find next available
 
-    def run(self, idx: int, mapper_queue: mp.Queue, collector_queue: mp.Queue):
+    def _run(self, idx: int, mapper_queue: mp.Queue, collector_queue: mp.Queue):
         """
         Process’s activity. It handles queue IO and invokes user's mapper handler.
         (subprocess, blocked, only two queues can be used to communicate with main process)
