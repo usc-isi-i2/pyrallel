@@ -30,7 +30,7 @@ use a shortcut instead::
     pp.join()
 
 Usually, some files are small and some are big, it would be better if it can keep all cores busy.
-One way is to send line by line to each processes (assume their contents are all line-separated)::
+One way is to send line by line to each process (assume content is line-separated)::
 
     def mapper(line, _idx):
         with open('processed_{}.out'.format(_idx), 'a') as f_out:
@@ -48,8 +48,8 @@ One way is to send line by line to each processes (assume their contents are all
     pp.join()
 
 One problem here is you need to acquire file descriptor every time the mapper is called.
-To avoid this, use Mapper class instead.
-It can be used to deal with the how process is constructed and deconstructed::
+To avoid this, use Mapper class to replace mapper function.
+It allows user to define the how process is constructed and deconstructed::
 
     class MyMapper(Mapper):
         def enter(self):
