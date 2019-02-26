@@ -42,6 +42,8 @@ from typing import Callable
 import sys
 import logging
 
+from pyrallel import Paralleller
+
 
 logger = logging.getLogger('MapReduce')
 logger.setLevel(logging.ERROR)
@@ -50,7 +52,7 @@ stdout_handler.setFormatter(logging.Formatter('%(asctime)-15s %(name)s [%(leveln
 logger.addHandler(stdout_handler)
 
 
-class MapReduce(object):
+class MapReduce(Paralleller):
     """
     Args:
         num_of_process (int): Number of mappers and reducers.
@@ -274,13 +276,13 @@ class MapReduce(object):
 
             # data
             try:
-                if context is None:  # can't use "not" operator here, context could be empty
+                if context is None:  # can't use "not" operator here, context could be empty object (list, dict, ...)
                     context = self._reducer_queue.get(timeout=0.1)
 
                 m = self._reducer_queue.get(timeout=0.1)
                 context = self._reducer(context, m)
             except queue.Empty:
-                # there are still some alive mapper, wait for their output
+                # there are still some alive mappers, wait for their output
                 if not no_running_mapper:
                     continue
 
@@ -292,6 +294,7 @@ class MapReduce(object):
                     continue
                 # kill itself, put context back to reducer queue
                 elif cmd[0] == self.__class__.CMD_REDUCER_KILL:
-                    self._reducer_queue.put(context)
+                    if context is not None:
+                        self._reducer_queue.put(context)
                     self._manager_cmd_queue.put( (self.__class__.CMD_REDUCER_FINISH, idx) )
                     return
