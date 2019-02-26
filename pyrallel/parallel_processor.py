@@ -91,6 +91,8 @@ import queue
 import inspect
 from typing import Callable, Iterable
 
+from pyrallel import Paralleller
+
 
 class Mapper(object):
     """
@@ -148,7 +150,7 @@ class CollectorThread(threading.Thread):
                 self.collector(*o)
 
 
-class ParallelProcessor(object):
+class ParallelProcessor(Paralleller):
     """
     Args:
         num_of_processor (int): Number of processes to use.
@@ -212,16 +214,6 @@ class ParallelProcessor(object):
         # otherwise, it assumes there's no collector.
         if collector:
             self.collector_thread = CollectorThread(self, collector)
-
-    def map(self, tasks: Iterable):
-        """
-        Syntactic sugar for adding task from an iterable object.
-
-        Args:
-            tasks (iter): Any iterable object.
-        """
-        for t in tasks:
-            self.add_task(t)
 
     def start(self):
         """
