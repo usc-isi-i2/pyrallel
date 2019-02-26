@@ -17,8 +17,8 @@ Yet another easy-to-use python parallel library for humans.
     :target: https://coveralls.io/github/usc-isi-i2/pyrallel?branch=master
     :alt: Coveralls
 
-.. image:: https://badge.fury.io/py/pyrallel.svg
-    :target: https://badge.fury.io/py/pyrallel
+.. image:: https://badge.fury.io/py/pyrallel.lib.svg
+    :target: https://badge.fury.io/py/pyrallel.lib
     :alt: pypi
 
 .. image:: https://readthedocs.org/projects/pyrallel/badge/?version=latest
