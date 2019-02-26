@@ -49,7 +49,7 @@ One way is to send line by line to each process (assume content is line-separate
 
 One problem here is you need to acquire file descriptor every time the mapper is called.
 To avoid this, use Mapper class to replace mapper function.
-It allows user to define the how process is constructed and deconstructed::
+It allows user to define how the process is constructed and deconstructed::
 
     class MyMapper(Mapper):
         def enter(self):
