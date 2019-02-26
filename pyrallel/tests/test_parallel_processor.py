@@ -4,7 +4,7 @@ import multiprocessing as mp
 from pyrallel.parallel_processor import ParallelProcessor, Mapper
 
 
-NUM_OF_PROCESSOR = min(2, int(mp.cpu_count() / 2))
+NUM_OF_PROCESSOR = max(2, int(mp.cpu_count() / 2))
 
 
 def test_basic():
