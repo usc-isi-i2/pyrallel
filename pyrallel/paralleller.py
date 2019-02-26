@@ -2,22 +2,37 @@ from abc import ABC, abstractmethod
 
 
 class Paralleller(ABC):
+    """
+    Paralleller is an abstract class defines common methods for concrete Parallellers.
+    """
 
     @abstractmethod
     def start(self):
-        pass
+        """
+        Start processes and / or threads.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def add_task(self, *args, **kwargs):
-        pass
+        """
+        Add new task.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def task_done(self):
-        pass
+        """
+        All tasks are added.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def join(self):
-        pass
+        """
+        Wait until all processes (threads) finish.
+        """
+        raise NotImplementedError
 
     def map(self, tasks: iter):
         """
