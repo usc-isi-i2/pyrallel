@@ -55,10 +55,10 @@ logger.addHandler(stdout_handler)
 class MapReduce(Paralleller):
     """
     Args:
-        num_of_process (int): Number of mappers and reducers.
+        num_of_process (int): Number of process for both mappers and reducers.
         mapper (Callable): Mapper function. The signature is `mapper(*args, **kwargs) -> object`.
         reducer (Callable): Reducer function. The signature is `reduce(object, object) -> object`.
-                        `object` arguments are the returns from `mapper`s.
+                        `object` arguments are the returns from `mapper` s.
         mapper_queue_size (int, optional): Maximum size of mapper queue, 0 by default means unlimited.
         reducer_queue_size (int, optional): Maximum size of reduce queue, 0 by default means unlimited.
     """
