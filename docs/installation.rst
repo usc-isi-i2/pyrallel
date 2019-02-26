@@ -3,7 +3,7 @@ Installation
 
 .. note::
 
-    Pyrallel supports Python 3 and it's tested under Python 3.3+.
+    Pyrallel supports Python 3 and it's tested under Python 3.4+.
 
 pip
 ----
