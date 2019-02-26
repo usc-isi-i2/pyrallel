@@ -21,7 +21,7 @@ with open('requirements.txt', 'r') as f:
 packages = find_packages()
 
 setup(
-    name='pyrallel',
+    name='pyrallel.lib',
     version=version,
     packages=packages,
     url='https://github.com/usc-isi-i2/pyrallel',

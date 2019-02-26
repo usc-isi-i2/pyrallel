@@ -10,11 +10,11 @@ pip
 
 Using pip to install::
 
-    pip install pyrallel
+    pip install pyrallel.lib
 
 If you want to update installed Pyrallel::
 
-    pip install -U pyrallel
+    pip install -U pyrallel.lib
 
 Development installation
 ------------------------

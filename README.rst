@@ -31,7 +31,7 @@ Installation
 ------------
 ::
 
-    pip install pyrallel
+    pip install pyrallel.lib
 
 
 Documentation
