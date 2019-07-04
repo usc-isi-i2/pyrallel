@@ -23,7 +23,7 @@ Example::
     def reducer(r1, r2):
         return r1 + r2
 
-    mr = rltk.MapReduce(8, mapper, reducer)
+    mr = MapReduce(8, mapper, reducer)
     mr.start()
 
     for i in range(10000):
@@ -35,12 +35,17 @@ Example::
     print(result)
 
 """
+__all__ = ['MapReduce']
 
 import multiprocessing as mp
+import multiprocessing.queues as mpq
 import queue
 from typing import Callable
 import sys
 import logging
+import uuid
+import pickle
+import math
 
 from pyrallel import Paralleller
 
@@ -50,6 +55,53 @@ logger.setLevel(logging.ERROR)
 stdout_handler = logging.StreamHandler(sys.stdout)
 stdout_handler.setFormatter(logging.Formatter('%(asctime)-15s %(name)s [%(levelname)s] %(message)s'))
 logger.addHandler(stdout_handler)
+
+
+class ChunkedQueue(mpq.Queue):
+    CHUNK_SIZE = 512 * 1024 * 1024
+
+    def __init__(self, *args, **kwargs):
+        ctx = mp.get_context()
+        super().__init__(*args, **kwargs, ctx=ctx)
+        self.buff = {}
+
+    def put(self, obj, block=True, timeout=None):
+        if not block:
+            return super().put(obj=obj, block=False, timeout=timeout)
+
+        chunk_size = self.__class__.CHUNK_SIZE
+        msg_id = uuid.uuid4()
+        msg_bytes = pickle.dumps(obj)
+        num_of_chunks = math.ceil(len(msg_bytes) / chunk_size)
+        logger.debug('putting data: #%s [%d], size: %d', msg_id, num_of_chunks, len(msg_bytes))
+        for i in range(num_of_chunks):
+            msg_obj = {
+                'b': msg_bytes[i * chunk_size : (i + 1) * chunk_size],  # body
+                'u': msg_id,  # msg id
+                'i': i + 1,  # chunk id
+                'n': num_of_chunks  # total number of chunks
+            }
+            super().put(obj=msg_obj, block=block, timeout=timeout)
+
+    def get(self, block=True, timeout=None):
+        if not block:
+            return super().get(block=False, timeout=timeout)
+
+        while True:
+            msg_obj = super().get(block=block, timeout=timeout)
+            logger.debug('getting data: #%s [%d/%d]', msg_obj['u'], msg_obj['i'], msg_obj['n'])
+            # small message
+            if msg_obj['u'] not in self.buff and msg_obj['i'] == msg_obj['n']:
+                return pickle.loads(msg_obj['b'])
+
+            # chunked message
+            if msg_obj['u'] not in self.buff:
+                self.buff[msg_obj['u']] = [None] * msg_obj['n']
+            self.buff[msg_obj['u']][msg_obj['i']-1] = msg_obj['b']
+            if msg_obj['i'] == msg_obj['n']:
+                msg = pickle.loads(b''.join(self.buff[msg_obj['u']]))
+                del self.buff[msg_obj['u']]
+                return msg
 
 
 class MapReduce(Paralleller):
@@ -74,8 +126,8 @@ class MapReduce(Paralleller):
     def __init__(self, num_of_process: int, mapper: Callable, reducer: Callable,
                  mapper_queue_size: int = 0, reducer_queue_size: int = 0):
         self._mapper_queue = mp.Queue(maxsize=mapper_queue_size)
-        self._reducer_queue = mp.Queue(maxsize=reducer_queue_size)
-        self._result_queue = mp.Queue()
+        self._reducer_queue = ChunkedQueue(maxsize=reducer_queue_size)
+        self._result_queue = ChunkedQueue()
         self._mapper_cmd_queue = [mp.Queue() for _ in range(num_of_process)]
         self._reducer_cmd_queue = [mp.Queue() for _ in range(num_of_process)]
         self._manager_cmd_queue = mp.Queue()
