@@ -85,6 +85,7 @@ In some situations, you may need to use `collector` to collect data back from ch
     print(processed)
 """
 
+import sys
 import multiprocessing as mp
 import threading
 import queue
@@ -106,6 +107,7 @@ class Mapper(object):
     """
     def __init__(self, idx):
         self._idx = idx
+        self._progress_info = ProgressThread.init_mapper_progress_info()
 
     def __enter__(self):
         self.enter()
@@ -150,6 +152,38 @@ class CollectorThread(threading.Thread):
                 self.collector(*o)
 
 
+class ProgressThread(threading.Thread):
+    """
+    """
+
+    P_ADDED = 0
+    P_LOADED = 1
+    P_PROCESSED = 2
+
+    def __init__(self, instance, progress, num_of_processor):
+        super(ProgressThread, self).__init__()
+        self.progress_info = {ProgressThread.P_ADDED: 0, ProgressThread.P_LOADED: 0, ProgressThread.P_PROCESSED: 0}
+        self.mapper_progress_info = [ProgressThread.init_mapper_progress_info() for _ in range(num_of_processor)]
+        self.instance = instance
+        self.progress = progress
+
+    @staticmethod
+    def init_mapper_progress_info():
+        return {ProgressThread.P_LOADED: 0, ProgressThread.P_PROCESSED: 0}
+
+    def refresh_progress_info(self):
+        self.progress_info[ProgressThread.P_LOADED] \
+            = sum([p[ProgressThread.P_LOADED] for p in self.mapper_progress_info])
+        self.progress_info[ProgressThread.P_PROCESSED] \
+            = sum([p[ProgressThread.P_PROCESSED] for p in self.mapper_progress_info])
+
+    def run(self):
+        for idx, mapper_progress_info in self.instance.get_progress():
+            self.mapper_progress_info[idx] = mapper_progress_info
+            self.refresh_progress_info()
+            self.progress(self.progress_info)
+
+
 class ParallelProcessor(Paralleller):
     """
     Args:
@@ -184,12 +218,14 @@ class ParallelProcessor(Paralleller):
 
     def __init__(self, num_of_processor: int, mapper: Callable, max_size_per_mapper_queue: int = 0,
                  collector: Callable = None, max_size_per_collector_queue: int = 0,
-                 enable_process_id: bool = False, batch_size: int = 1):
+                 enable_process_id: bool = False, batch_size: int = 1, progress=None):
         self.num_of_processor = num_of_processor
         self.mapper_queues = [mp.Queue(maxsize=max_size_per_mapper_queue) for _ in range(num_of_processor)]
         self.collector_queues = [mp.Queue(maxsize=max_size_per_collector_queue) for _ in range(num_of_processor)]
         self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[i], self.collector_queues[i]))
                           for i in range(num_of_processor)]
+        self.progress_queues = [mp.Queue(maxsize=1) for _ in range(num_of_processor)]
+        self.progress = progress
 
         ctx = self
         if not inspect.isclass(mapper) or not issubclass(mapper, Mapper):
@@ -215,12 +251,17 @@ class ParallelProcessor(Paralleller):
         if collector:
             self.collector_thread = CollectorThread(self, collector)
 
+        if progress:
+            self.progress_thread = ProgressThread(self, progress, num_of_processor)
+
     def start(self):
         """
         Start processes and threads.
         """
         if self.collector:
             self.collector_thread.start()
+        if self.progress:
+            self.progress_thread.start()
         for p in self.processes:
             p.start()
 
@@ -228,10 +269,12 @@ class ParallelProcessor(Paralleller):
         """
         Block until processes and threads return.
         """
-        for p in self.processes:
-            p.join()
         if self.collector:
             self.collector_thread.join()
+        if self.progress:
+            self.progress_thread.join()
+        for p in self.processes:
+            p.join()
 
     def task_done(self):
         """
@@ -251,6 +294,7 @@ class ParallelProcessor(Paralleller):
         (main process, unblocked, using round robin to find next available queue)
         """
         self.batch_data.append((args, kwargs))
+        self.progress_thread.progress_info[ProgressThread.P_ADDED] += 1
 
         if len(self.batch_data) == self.batch_size:
             self._add_task(self.batch_data)
@@ -276,6 +320,7 @@ class ParallelProcessor(Paralleller):
                 data = mapper_queue.get()
                 if data[0] == ParallelProcessor.CMD_STOP:
                     # print(idx, 'stop')
+                    self._update_progress(mapper, finish=True)
                     if self.collector:
                         collector_queue.put((ParallelProcessor.CMD_STOP,))
                     return
@@ -284,7 +329,9 @@ class ParallelProcessor(Paralleller):
                     for d in data[1]:
                         args, kwargs = d[0], d[1]
                         # print(idx, 'data')
+                        self._update_progress(mapper, type_=ProgressThread.P_LOADED)
                         result = mapper.process(*args, **kwargs)
+                        self._update_progress(mapper, type_=ProgressThread.P_PROCESSED)
                         if self.collector:
                             if not isinstance(result, tuple):  # collector must represent as tuple
                                 result = (result,)
@@ -292,6 +339,18 @@ class ParallelProcessor(Paralleller):
                     if len(batch_result) > 0:
                         collector_queue.put((ParallelProcessor.CMD_DATA, batch_result))
                         batch_result = []  # reset buffer
+
+    def _update_progress(self, mapper, type_=None, finish=False):
+        if self.progress:
+            try:
+                if not finish:
+                    mapper._progress_info[type_] += 1
+                    self.progress_queues[mapper._idx].put_nowait( (ParallelProcessor.CMD_DATA, mapper._progress_info) )
+                else:
+                    # update the last progress of each mapper
+                    self.progress_queues[mapper._idx].put( (ParallelProcessor.CMD_STOP, mapper._progress_info) )
+            except queue.Full:
+                pass
 
     def collect(self):
         """
@@ -315,3 +374,35 @@ class ParallelProcessor(Paralleller):
                 if len(self.collector_queues) == 0:  # all finished
                     return
                 self.collector_queue_index = (self.collector_queue_index + 1) % len(self.collector_queues)
+
+    def get_progress(self):
+        if not self.progress:
+            return
+
+        idx = 0
+        finish_num = 0
+        while True:
+            if finish_num == self.num_of_processor:
+                return
+
+            # get next not None queue
+            q = None
+            tmp_idx = idx
+            while not q:
+                q = self.progress_queues[tmp_idx]
+                idx = tmp_idx
+                tmp_idx = (tmp_idx + 1) % self.num_of_processor
+
+            try:
+                data = q.get_nowait()  # get out
+                if data[0] == ParallelProcessor.CMD_STOP:
+                    self.progress_queues[idx] = None  # set to None if it's finished
+                    finish_num += 1
+                elif data[0] == ParallelProcessor.CMD_DATA:
+                    pass
+                yield idx, data[1]
+            except queue.Empty:
+                continue  # find next available
+            finally:
+                idx = (idx + 1) % self.num_of_processor
+
