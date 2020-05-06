@@ -37,8 +37,8 @@ Example::
 """
 __all__ = ['MapReduce']
 
-import multiprocessing as mp
-import multiprocessing.queues as mpq
+import multiprocess as mp
+import multiprocess.queues as mpq
 import queue
 from typing import Callable
 import sys

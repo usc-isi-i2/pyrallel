@@ -85,7 +85,7 @@ In some situations, you may need to use `collector` to collect data back from ch
     print(processed)
 """
 
-import multiprocessing as mp
+import multiprocess as mp
 import threading
 import queue
 import inspect
