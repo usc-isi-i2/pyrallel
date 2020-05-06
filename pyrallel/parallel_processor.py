@@ -295,7 +295,8 @@ class ParallelProcessor(Paralleller):
         (main process, unblocked, using round robin to find next available queue)
         """
         self.batch_data.append((args, kwargs))
-        self.progress_thread.progress_info[ProgressThread.P_ADDED] += 1
+        if self.progress:
+            self.progress_thread.progress_info[ProgressThread.P_ADDED] += 1
 
         if len(self.batch_data) == self.batch_size:
             self._add_task(self.batch_data)
