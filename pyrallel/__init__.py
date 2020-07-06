@@ -1,3 +1,4 @@
+from pyrallel.queue import ShmQueue
 from pyrallel.paralleller import Paralleller
 from pyrallel.parallel_processor import ParallelProcessor, Mapper, ProgressThread
 from pyrallel.map_reduce import MapReduce
