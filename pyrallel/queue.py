@@ -39,9 +39,9 @@ class ShmQueue(mpq.Queue):
         self.meta_blocks = []
         for _ in range(maxsize):
             self.meta_blocks.append(SharedMemory(create=True, size=self.__class__.META_BLOCK_SIZE))
-        self.blocks = []
+        self.data_blocks = []
         for _ in range(maxsize):
-            self.blocks.append(SharedMemory(create=True, size=self.chunk_size))
+            self.data_blocks.append(SharedMemory(create=True, size=self.chunk_size))
 
     def get_meta(self, block, type_):
         addr_s, addr_e, ctype = self.__class__.META_STRUCT.get(type_)
@@ -108,7 +108,7 @@ class ShmQueue(mpq.Queue):
         try:
             for i in range(total_chunks):
                 block_id = self.next_writable_block_id(block)
-                meta_block, data_block = self.meta_blocks[block_id], self.blocks[block_id]
+                meta_block, data_block = self.meta_blocks[block_id], self.data_blocks[block_id]
                 chunk_data = msg_body[i * self.chunk_size: (i + 1) * self.chunk_size]
                 chunk_id = i + 1
                 msg_size = len(chunk_data)
@@ -131,7 +131,7 @@ class ShmQueue(mpq.Queue):
             msg_id = self.next_readable_msg_id(block)
             while True:
                 block_id = self.read_next_block_id(msg_id)
-                meta_block, data_block = self.meta_blocks[block_id], self.blocks[block_id]
+                meta_block, data_block = self.meta_blocks[block_id], self.data_blocks[block_id]
 
                 msg_id = self.get_meta(meta_block, 'msg_id')
                 msg_size = self.get_meta(meta_block, 'msg_size')
@@ -173,7 +173,7 @@ class ShmQueue(mpq.Queue):
         for block in self.meta_blocks:
             block.close()
             block.unlink()
-        for block in self.blocks:
+        for block in self.data_blocks:
             block.close()
             block.unlink()
 
