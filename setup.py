@@ -1,8 +1,7 @@
 from distutils.core import setup
 from setuptools import find_packages
+from pyrallel import __version__
 
-with open('VERSION', 'r') as f:
-    version = f.readline().strip()
 
 with open('README.rst', 'r') as fh:
     long_description = fh.read()
@@ -22,7 +21,7 @@ packages = find_packages()
 
 setup(
     name='pyrallel.lib',
-    version=version,
+    version=__version__,
     packages=packages,
     url='https://github.com/usc-isi-i2/pyrallel',
     project_urls={
