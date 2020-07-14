@@ -6,6 +6,7 @@ import math
 import uuid
 import struct
 import sys
+import time
 
 
 if sys.version_info >= (3, 8):
@@ -86,20 +87,22 @@ class ShmQueue(mpq.Queue):
             if cand != self.__class__.EMPTY_MSG_ID:
                 return cand
 
-    def next_writable_block_id(self, block):
+    def next_writable_block_id(self, block, timeout):
         i = 0
+        time_start = time.time()
         while True:
             if self.get_meta(self.meta_blocks[i], 'msg_id') == self.__class__.EMPTY_MSG_ID:
                 return i
 
             i += 1
             if i >= len(self.meta_blocks):
-                if not block:
+                if not block or (timeout and (time.time() - time_start) > timeout):
                     raise Full
                 i = 0
 
-    def next_readable_msg_id(self, block):
+    def next_readable_msg_id(self, block, timeout):
         i = 0
+        time_start = time.time()
         while True:
             if self.get_meta(self.meta_blocks[i], 'msg_id') != self.__class__.EMPTY_MSG_ID:
                 if self.get_meta(self.meta_blocks[i], 'chunk_id') == 1:
@@ -107,7 +110,7 @@ class ShmQueue(mpq.Queue):
 
             i += 1
             if i >= len(self.meta_blocks):
-                if not block:
+                if not block or (timeout and (time.time() - time_start) > timeout):
                     raise Empty
                 i = 0
 
@@ -141,13 +144,16 @@ class ShmQueue(mpq.Queue):
         msg_body = self.serializer.dumps(msg)
         total_chunks = math.ceil(len(msg_body) / self.chunk_size)
 
+        time_start = time.time()
         lock = self.producer_lock.acquire(timeout=timeout)
+        if timeout:
+            timeout -= (time.time() - time_start)
         if block and not lock:
             raise Full
 
         try:
             for i in range(total_chunks):
-                block_id = self.next_writable_block_id(block)
+                block_id = self.next_writable_block_id(block, timeout)
                 meta_block, data_block = self.meta_blocks[block_id], self.data_blocks[block_id]
                 chunk_data = msg_body[i * self.chunk_size: (i + 1) * self.chunk_size]
                 chunk_id = i + 1
@@ -176,12 +182,15 @@ class ShmQueue(mpq.Queue):
         Note:
             `queue.Empty` exception will be raised if it times out or queue is empty when `block` is False.
         """
+        time_start = time.time()
         lock = self.consumer_lock.acquire(timeout=timeout)
+        if timeout:
+            timeout -= (time.time() - time_start)
         if block and not lock:
             raise Empty
 
         try:
-            msg_id = self.next_readable_msg_id(block)
+            msg_id = self.next_readable_msg_id(block, timeout)
             while True:
                 block_id = self.read_next_block_id(msg_id)
                 meta_block, data_block = self.meta_blocks[block_id], self.data_blocks[block_id]
