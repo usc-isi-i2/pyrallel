@@ -15,28 +15,29 @@ def test_shmqueue():
     if not hasattr(pyrallel, 'ShmQueue'):
         return
 
-    mp.set_start_method('fork')
-    ShmQueueCls = getattr(pyrallel, 'ShmQueue')
-    sq = ShmQueueCls(chunk_size=1024 * 4, maxsize=5)
-    q = mp.Queue()
-    p1 = mp.Process(target=f, args=(sq, q,))
-    p2 = mp.Process(target=f, args=(sq, q,))
-    p1.start()
-    p2.start()
+    for mode in ['fork', 'spawn']:
+        mp.set_start_method(mode, force=True)
+        ShmQueueCls = getattr(pyrallel, 'ShmQueue')
+        sq = ShmQueueCls(chunk_size=1024 * 4, maxsize=5)
+        q = mp.Queue()
+        p1 = mp.Process(target=f, args=(sq, q,))
+        p2 = mp.Process(target=f, args=(sq, q,))
+        p1.start()
+        p2.start()
 
-    items = list(range(10))
+        items = list(range(10))
 
-    for i in items:
-        sq.put(i)
+        for i in items:
+            sq.put(i)
 
-    while True:
-        try:
-            e = q.get(timeout=2)
-            assert e in items
-        except queue.Empty:
-            break
+        while True:
+            try:
+                e = q.get(timeout=2)
+                assert e in items
+            except queue.Empty:
+                break
 
-    p1.join()
-    p2.join()
-    sq.close()
-    q.close()
+        p1.join()
+        p2.join()
+        sq.close()
+        q.close()

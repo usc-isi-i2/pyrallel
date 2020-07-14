@@ -7,6 +7,7 @@ import uuid
 import struct
 import sys
 import time
+import dill
 
 
 if sys.version_info >= (3, 8):
@@ -72,6 +73,19 @@ class ShmQueue(mpq.Queue):
         self.data_blocks = []
         for _ in range(maxsize):
             self.data_blocks.append(SharedMemory(create=True, size=self.chunk_size))
+
+    def __getstate__(self):
+        return (dill.dumps(self.serializer), self.chunk_size, self.producer_lock,
+                self.consumer_lock, self.block_locks, dill.dumps(self.meta_blocks), dill.dumps(self.data_blocks))
+
+    def __setstate__(self, state):
+        (self.serializer, self.chunk_size, self.producer_lock,
+         self.consumer_lock, self.block_locks, self.meta_blocks, self.data_blocks) = state
+        self.buf_msg_id = None
+        self.buf_msg_body = None
+        self.meta_blocks = dill.loads(self.meta_blocks)
+        self.data_blocks = dill.loads(self.data_blocks)
+        self.serializer = dill.loads(self.serializer)
 
     def get_meta(self, block, type_):
         addr_s, addr_e, ctype = self.__class__.META_STRUCT.get(type_)
