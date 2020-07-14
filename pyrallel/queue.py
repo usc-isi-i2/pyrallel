@@ -1,14 +1,43 @@
 import multiprocessing as mp
 import multiprocessing.queues as mpq
-from multiprocessing.shared_memory import SharedMemory
 from queue import Full, Empty
 import pickle
 import math
 import uuid
 import struct
+import sys
+
+
+if sys.version_info >= (3, 8):
+    from multiprocessing.shared_memory import SharedMemory
+
+    __all__ = ['ShmQueue']
+else:
+    __all__ = []
 
 
 class ShmQueue(mpq.Queue):
+    """
+    ShmQueue depends on shared memory instead of pipe to efficiently exchange data among processes.
+    Shared memory is "System V style" memory blocks which can be shared and accessed directly by processes.
+    This implementation is based on `multiprocessing.shared_memory.SharedMemory` hence requires Python >= 3.8.
+    Its interface is almost identical to `multiprocessing.queue <https://docs.python.org/3.8/library/multiprocessing.html#multiprocessing.Queue>`_.
+    But it allows to specify serializer which by default is pickle.
+
+
+    Args:
+        chunk_size (int, optional): Size of each chunk. By default, it is 1*1024*1024.
+        maxsize (int, optional): Maximum size of queue. If it is 0 (default), \
+                                it will be set to `ShmQueue.MAX_CHUNK_SIZE`.
+        serializer (int, optional): Serializer to serialize and deserialize data. \
+                                If it is None (default), pickle will be used. \
+                                The serialize should have implemented `loads(bytes data) -> object` \
+                                and `dumps(object obj) -> bytes`.
+
+    Note:
+        - `close` needs to be invoked once to release memory and avoid memory leak.
+        - `qsize`, `empty` and `full` are not currently implemented since they are not reliable in multiprocessing.
+    """
     MAX_CHUNK_SIZE = 512 * 1024 * 1024  # system limit is 2G, 512MB is enough
     META_BLOCK_SIZE = 24
 
@@ -97,6 +126,17 @@ class ShmQueue(mpq.Queue):
     #         print(bytes(b.buf[0:24]))
 
     def put(self, msg, block=True, timeout=None):
+        """
+        Put an object into queue.
+
+        Args:
+            msg (obj): The object which needs to put into queue.
+            block (bool, optional): If it is set to True (default), it will return after an item is put into queue.
+            timeout (int, optional): It can be any positive integer and only effective when `block` is set to True.
+
+        Note:
+            `queue.Full` exception will be raised if it times out or queue is full when `block` is False.
+        """
         msg_id = self.generate_msg_id()
         msg_body = self.serializer.dumps(msg)
         total_chunks = math.ceil(len(msg_body) / self.chunk_size)
@@ -123,6 +163,19 @@ class ShmQueue(mpq.Queue):
             self.producer_lock.release()
 
     def get(self, block=True, timeout=None):
+        """
+        Return data from queue.
+
+        Args:
+            block (bool, optional): If it is set to True (default), it will only return when an item is available.
+            timeout (int, optional): It can be any positive integer and only effective when `block` is set to True.
+
+        Returns:
+            object: Object.
+
+        Note:
+            `queue.Empty` exception will be raised if it times out or queue is empty when `block` is False.
+        """
         lock = self.consumer_lock.acquire(timeout=timeout)
         if block and not lock:
             raise Empty
@@ -155,9 +208,15 @@ class ShmQueue(mpq.Queue):
             self.consumer_lock.release()
 
     def get_nowait(self):
+        """
+        Equivalent to `get(False)`.
+        """
         return self.get(False)
 
     def put_nowait(self, msg):
+        """
+        Equivalent to `put(obj, False)`.
+        """
         return self.put(msg, False)
 
     def qsize(self):
@@ -170,6 +229,9 @@ class ShmQueue(mpq.Queue):
         raise NotImplementedError
 
     def close(self):
+        """
+        Indicate no more new data will be added and release the share memory.
+        """
         for block in self.meta_blocks:
             block.close()
             block.unlink()

@@ -6,4 +6,4 @@ Modules
 
    parallel_processor.rst
    map_reduce.rst
-
+   queue.rst
