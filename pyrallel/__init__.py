@@ -1,4 +1,4 @@
-__version__ = '0.0.5'
+__version__ = '0.0.6'
 
 from pyrallel.queue import *
 from pyrallel.paralleller import Paralleller
