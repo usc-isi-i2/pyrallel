@@ -3,7 +3,7 @@ ParallelProcessor utilizes multiple CPU cores to process compute-intensive tasks
 
 
 If you have a some time-consuming statements in a for-loop and no state is shared among loops, you can map these
-statements to different processes. Assume you need to process couple of files, you can do this in parallel::
+statements to different processes. Assume you need to process a couple of files, you can do this in parallel::
 
     def mapper(filename):
         with open(filename) as f_in, open(filename + '.out') as f_out:
@@ -18,8 +18,8 @@ statements to different processes. Assume you need to process couple of files, y
     pp.task_done()
     pp.join()
 
-It's not required to have a loop statement if you have iterable object or type (list, generator, etc),
-use a shortcut instead::
+It's not required to write a cumbersome loop statement if you have iterable object or type (list, generator, etc).
+Instead, you could use `map`::
 
     pp = ParallelProcessor(2, mapper)
     pp.start()
@@ -30,7 +30,7 @@ use a shortcut instead::
     pp.join()
 
 Usually, some files are small and some are big, it would be better if it can keep all cores busy.
-One way is to send line by line to each process (assume content is line-separated)::
+One way is to send content line by line to each process (assume content is line-separated)::
 
     def mapper(line, _idx):
         with open('processed_{}.out'.format(_idx), 'a') as f_out:
@@ -60,6 +60,8 @@ It allows user to define how the process is constructed and deconstructed::
 
         def process(self, line):
             self.f.write(process_a_line(line))
+
+    pp = ParallelProcessor(..., mapper=MyMapper, ...)
 
 In some situations, you may need to use `collector` to collect data back from child processes to main process::
 
