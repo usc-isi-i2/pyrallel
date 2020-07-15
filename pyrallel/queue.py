@@ -39,6 +39,20 @@ class ShmQueue(mpq.Queue):
     Note:
         - `close` needs to be invoked once to release memory and avoid memory leak.
         - `qsize`, `empty` and `full` are not currently implemented since they are not reliable in multiprocessing.
+
+    Example::
+
+        def run(q):
+            e = q.get()
+            print(e)
+
+        if __name__ == '__main__':
+            q = ShmQueue(chunk_size=1024 * 4, maxsize=10)
+            p = Process(target=run, args=(q,))
+            p.start()
+            q.put(100)
+            p.join()
+            q.close()
     """
     MAX_CHUNK_SIZE = 512 * 1024 * 1024  # system limit is 2G, 512MB is enough
     META_BLOCK_SIZE = 24
@@ -253,7 +267,7 @@ class ShmQueue(mpq.Queue):
 
     def close(self):
         """
-        Indicate no more new data will be added and release the share memory.
+        Indicate no more new data will be added and release the shared memory.
         """
         for block in self.meta_blocks:
             block.close()
