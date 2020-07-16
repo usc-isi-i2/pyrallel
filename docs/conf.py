@@ -54,7 +54,7 @@ author = 'USC/ISI'
 # |version| and |release|, also used in various other places throughout the
 # built documents.
 #
-from pyrallel import __version__
+from pyrallel.__version__ import __version__
 # The short X.Y version.
 version = '.'.join(__version__.split('.')[:2])
 # The full version, including alpha/beta/rc tags.
