@@ -4,4 +4,4 @@ docs:
 	@cd docs && make html
 
 release:
-	@VERSION=$$(python -c "import pyrallel;print(pyrallel.__version__)") && git tag $$VERSION
+	@VERSION=$$(python -c "from pyrallel.__version__ import __version__;print(__version__)") && git tag $$VERSION
