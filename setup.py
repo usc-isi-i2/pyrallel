@@ -1,6 +1,6 @@
+import os
 from distutils.core import setup
 from setuptools import find_packages
-from pyrallel.__version__ import __version__
 
 
 with open('README.rst', 'r') as fh:
@@ -17,11 +17,17 @@ with open('requirements.txt', 'r') as f:
             else:
                 install_requires.append(re)
 
+about = {}
+with open(
+        os.path.join(os.path.abspath(os.path.dirname(__file__)), 'pyrallel', '__version__.py'),
+        'r', encoding='utf-8') as f:
+    exec(f.read(), about)
+
 packages = find_packages()
 
 setup(
     name='pyrallel.lib',
-    version=__version__,
+    version=about['__version__'],
     packages=packages,
     url='https://github.com/usc-isi-i2/pyrallel',
     project_urls={
