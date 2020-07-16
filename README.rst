@@ -25,6 +25,10 @@ Yet another easy-to-use python parallel library for humans.
     :target: http://pyrallel.readthedocs.io/en/latest
     :alt: Documents
 
+- ParallelProcessor: Newbie-friendly process-based parallel computing api.
+- MapReduce: Ultimately simple map and reduce computing model.
+- ShmQueue: Extremely fast shared memory driven general purpose multiprocessing queue.
+
 .. end-intro
 
 Installation
