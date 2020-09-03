@@ -80,7 +80,7 @@ class ShmQueue(mpq.Queue):
                  maxsize=2,
                  serializer=None,
                  integrity_check: bool=False,
-                 deadlock_check: bool=True,
+                 deadlock_check: bool=False,
                  deadlock_immanent_check: bool=True,
                  watermark_check: bool = True,
                  verbose: bool=False):
@@ -108,9 +108,6 @@ class ShmQueue(mpq.Queue):
         self.chunk_watermark = 0
 
         self.mid_counter = 0
-
-        self.buf_msg_id = None
-        self.buf_msg_body = None
 
         self.producer_lock = ctx.Lock()
         self.consumer_lock = ctx.Lock()
@@ -190,7 +187,7 @@ class ShmQueue(mpq.Queue):
                         looped = True
                         print("next_writable_block_id: src_pid=%d qid=%d: looping (%d loops)" % (src_pid, self.qid, loop_cnt), file=sys.stderr, flush=True) # ***
 
-    def next_readable_msg_block_id(self, block, timeout):
+    def next_readable_msg(self, block, timeout):
         i = 0
         time_start = time.time()
         while True:
@@ -204,7 +201,7 @@ class ShmQueue(mpq.Queue):
                         # eading by the current process by changing its
                         # chunk_id from 1 to the reserved chunk ID.
                         self.set_meta(meta_block, self.__class__.RESERVED_CHUNK_ID, 'chunk_id')
-                        return i, self.get_meta(meta_block, 'src_pid'), msg_id
+                        return self.get_meta(meta_block, 'src_pid'), msg_id, i, self.get_meta(meta_block, 'total_chunks')
 
             i += 1
             if i >= len(self.meta_blocks):
@@ -249,32 +246,32 @@ class ShmQueue(mpq.Queue):
             total_msg_size = len(msg_body)
             msg2 = self.serializer.loads(msg_body)
             if self.verbose:
-                print("put: src_pid=%d msg_qid=%s serialization integrity check is OK." % (src_pid, msg_id), file=sys.stderr, flush=True) # ***
+                print("put: qid=%d src_pid=%d msg_id=%s: serialization integrity check is OK." % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # ***
             
         total_chunks = math.ceil(len(msg_body) / self.chunk_size)
         if self.verbose:
-            print("put: src_pid=%d qid=%d: ***total_chunks=%d*** len(msg_body)=%d chunk_size=%d" % (src_pid, self.qid, total_chunks, len(msg_body), self.chunk_size), file=sys.stderr, flush=True) # ***
+            print("put: qid=%d src_pid=%d msg_id=%s: total_chunks=%d len(msg_body)=%d chunk_size=%d" % (self.qid, src_pid, msg_id, total_chunks, len(msg_body), self.chunk_size), file=sys.stderr, flush=True) # ***
         if self.watermark_check or self.verbose:
             if total_chunks > self.chunk_watermark:
-                print("put: src_pid=%d qid=%d: total_chunks=%d maxsize=%d new watermark" % (src_pid, self.qid, total_chunks, self.maxsize), file=sys.stderr, flush=True) # ***
+                print("put: qid=%d src_pid=%d msg_id=%s: total_chunks=%d maxsize=%d new watermark" % (self.qid, src_pid, msg_id, total_chunks, self.maxsize), file=sys.stderr, flush=True) # ***
                 self.chunk_watermark = total_chunks
 
         if self.deadlock_immanent_check and total_chunks > self.maxsize:
-            raise ValueError("DEADLOCK IMMANENT: src_pid=%d qid=%d: total_chunks=%d > maxsize=%d" % (src_pid, self.qid, total_chunks, self.maxsize))
+            raise ValueError("DEADLOCK IMMANENT: qid=%d src_pid=%d: total_chunks=%d > maxsize=%d" % (self.qid, src_pid, total_chunks, self.maxsize))
         
         if self.verbose:
-            print("put: src_pid=%d qid=%d: acquiring producer lock" % (src_pid, self.qid), file=sys.stderr, flush=True) # *** 
+            print("put: qid=%d src_pid=%d msg_id=%s: acquiring producer lock" % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # *** 
         time_start = time.time()
         lock = self.producer_lock.acquire(timeout=timeout)
         if timeout:
             timeout -= (time.time() - time_start)
         if block and not lock:
             if self.verbose:
-                print("put: src_pid=%d qid=%d FULL" % (src_pid, self.qid), file=sys.stderr, flush=True) # ***
+                print("put: qid=%d src_pid=%d msg_id=%s: queue FULL" % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # ***
             raise Full # Note: a message ID has been consumed by the failed attempt.
 
         try:
-            # In case we will process more than one cchunk and this is a
+            # In case we will process more than one chunk and this is a
             # nonblocking or timed out request, start by reserving all the
             # blocks that we will need.
             block_id_list: typing.List[int] = [ ]
@@ -287,29 +284,41 @@ class ShmQueue(mpq.Queue):
                     # We failed to find a free block and/or a timeout occured.
                     # Relese the reserved blocks.
                     if self.verbose:
-                        print("put: src_pid=%d qid=%d releasing %d blocks" % (src_pid, self.qid, len(block_id_list)), file=sys.stderr, flush=True) # ***
+                        print("put: qid=%d src_pid=%d msg_id=%s: releasing %d blocks" % (self.qid, src_pid, msg_id, len(block_id_list)), file=sys.stderr, flush=True) # ***
                     for block_id in block_id_list:
                         with self.block_locks[block_id]:
                             meta_block = self.meta_blocks[block_id]
                             self.set_meta(meta_block, self.__class__.EMPTY_MSG_ID, 'msg_id')
-                    raise Full # Note: a message ID has been consumed by the failed attempt.
+                    raise # Note: a message ID has been consumed by the failed attempt.
 
+            if self.verbose:
+                print("put: qid=%d src_pid=%d msg_id=%s: acquired %d blocks" % (self.qid, src_pid, msg_id, total_chunks), file=sys.stderr, flush=True) # *** 
+
+        finally:
+            # Now that we have acquired the full set of chunks, we can release
+            # the producer lock.  We don't want to hold it while we transfer
+            # data into the blocks.
+            if self.verbose:
+                print("put: qid=%d src_pid=%d msg_id=%s: releasing producer lock" % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # *** 
+            self.producer_lock.release()
+
+        try:
             # Now that we have a full set of blocks, queue the
             # chunks:
             for i, block_id in enumerate(block_id_list):
+                chunk_id = i + 1
                 if self.verbose:
-                    print("put: src_pid=%d qid=%d: i=%d" % (src_pid, self.qid, i), file=sys.stderr, flush=True) # *** 
+                    print("put: qid=%d src_pid=%d msg_id=%s: chunk_id=%d of total_chunks=%d" % (self.qid, src_pid, msg_id, chunk_id, total_chunks), file=sys.stderr, flush=True) # *** 
                
                 meta_block, data_block = self.meta_blocks[block_id], self.data_blocks[block_id]
                 chunk_data = msg_body[i * self.chunk_size: (i + 1) * self.chunk_size]
-                chunk_id = i + 1
                 msg_size = len(chunk_data)
                 if self.verbose:
-                    print("put: src_pid=%d qid=%d: msg_id=%s msg_size=%d chunk_id=%d total_chunks=%d." % (src_pid, self.qid, msg_id, msg_size, chunk_id, total_chunks), file=sys.stderr, flush=True) # ***
+                    print("put: qid=%d src_pid=%d msg_id=%s: chunk_id=%d: msg_size=%d." % (self.qid, src_pid, msg_id, chunk_id, msg_size), file=sys.stderr, flush=True) # ***
                 if self.integrity_check:
                     checksum = zlib.adler32(chunk_data)
                     if self.verbose:
-                        print("put: src_pid=%d, qid=%d: msg_id=%s checksum=%x total_msg_size=%d" % (src_pid, self.qid, msg_id, checksum, total_msg_size), file=sys.stderr, flush=True) # ***
+                        print("put: qid=%d src_pid=%d msg_id=%s: chunk_id=%d: checksum=%x total_msg_size=%d" % (self.qid, src_pid, msg_id, chunk_id, checksum, total_msg_size), file=sys.stderr, flush=True) # ***
 
                 with self.block_locks[block_id]:
                     self.set_meta(meta_block, msg_id, 'msg_id')
@@ -322,8 +331,7 @@ class ShmQueue(mpq.Queue):
                     data_block.buf[0:msg_size] = chunk_data
         finally:
             if self.verbose:
-                print("put: src_pid=%d qid=%d: releasing producer lock" % (src_pid, self.qid), file=sys.stderr, flush=True) # *** 
-            self.producer_lock.release()
+                print("put: qid=%d src_pid=%d msg_id=%s: message sent" % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # *** 
 
     def get(self, block=True, timeout=None):
         """
@@ -353,74 +361,94 @@ class ShmQueue(mpq.Queue):
         msg_block_ids = [ ]
         
         try:
-            block_id, src_pid, msg_id = self.next_readable_msg_block_id(block, timeout) # This call might raise Empty.
-            chunk_id = 1
-            chunk_count = 0
-            while True:
+            src_pid, msg_id, block_id, total_chunks = self.next_readable_msg(block, timeout) # This call might raise Empty.
+            if self.verbose:
+                print("get: qid=%d src_pid=%d msg_id=%s: total_chunks=%d." % (self.qid, src_pid, msg_id, total_chunks), file=sys.stderr, flush=True) # ***
+            msg_block_ids.append(block_id)
 
-                if chunk_count > 0:
-                    block_id = self.read_next_block_id(src_pid, msg_id, chunk_count + 1)
-                meta_block, data_block = self.meta_blocks[block_id], self.data_blocks[block_id]
+            # Acquire the chunks for the rest of the message:
+            for i in range(1, total_chunks):
+                chunk_id = i + 1
+                if self.verbose:
+                    print("get: qid=%d src_pid=%d msg_id=%s: acquiring chunk_id=%d." % (self.qid, src_pid, msg_id, chunk_id), file=sys.stderr, flush=True) # ***
+                block_id = self.read_next_block_id(src_pid, msg_id, chunk_id)
                 msg_block_ids.append(block_id)
 
+        except Exception:
+            # Release the data blocks (losing the message) if we get an
+            # unexpected exception:
+            if self.verbose:
+                print("put: qid=%d: releasing data blocks due to Exception" % self.qid, file=sys.stderr, flush=True) # *** 
+            for block_id in msg_block_ids:
                 with self.block_locks[block_id]:
-                    if chunk_count == 0:
-                        total_chunks = self.get_meta(meta_block, 'total_chunks')
-                    else:
-                        chunk_id = self.get_meta(meta_block, 'chunk_id')
+                    self.set_meta(self.meta_blocks[block_id], self.__class__.EMPTY_MSG_ID, 'msg_id')
+            msg_block_ids.clear()
+            raise
+
+        finally:
+            # We don't need the consumer lock any more, and we don't want to
+            # hold it while deserializing the message data.
+            if self.verbose:
+                print("put: qid=%d: releasing consumer lock" % self.qid, file=sys.stderr, flush=True) # *** 
+            self.consumer_lock.release()
+
+        buf_msg_body = [None] * total_chunks
+        try:
+            for i, block_id in enumerate(msg_block_ids):
+                chunk_id = i + 1
+                meta_block = self.meta_blocks[block_id]
+                data_block = self.data_blocks[block_id]
+                with self.block_locks[block_id]:
                     msg_size = self.get_meta(meta_block, 'msg_size')
                     if self.integrity_check:
-                        if chunk_count == 0:
+                        if i == 0:
                             total_msg_size = self.get_meta(meta_block, 'total_msg_size')
                         checksum = self.get_meta(meta_block, 'checksum')
-                    chunk_data = data_block.buf[0:msg_size] # This makes a reference, not a deep copy.
-                chunk_count += 1
+                    chunk_data = data_block.buf[0:msg_size] # This may make a reference, not a deep copy.
                 if self.verbose:
-                    print("get: qid=%d src_pid=%d msg_id=%s: msg_size=%d chunk_id=%d total_chunks=%d." % (self.qid, src_pid, msg_id, msg_size, chunk_id, total_chunks), file=sys.stderr, flush=True) # ***
+                    print("get: qid=%d src_pid=%d msg_id=%s: chunk_id=%d: msg_size=%d total_chunks=%d." % (self.qid, src_pid, msg_id, chunk_id, msg_size, total_chunks), file=sys.stderr, flush=True) # ***
                 if self.integrity_check:
                     checksum2 = zlib.adler32(chunk_data)
                     if checksum == checksum2:
                         if self.verbose:
-                            print("get: qid=%d src_pid=%d msg_id=%s: checksum=%x is OK" % (src_pid, self.qid, msg_id, checksum), file=sys.stderr, flush=True) # ***
+                            print("get: qid=%d src_pid=%d msg_id=%s: chunk_id=%d: checksum=%x is OK" % (self.qid, src_pid, msg_id, chunk_id, checksum), file=sys.stderr, flush=True) # ***
                     else:
-                        raise ValueError("ShmQueue.get: qid=%d src_pid=%d msg_id=%s: checksum=%x != checksum2=%x -- FAIL!" % (self.qid, src_pid, msg_id, checksum, checksum2)) # TODO: use a better exception
+                        raise ValueError("ShmQueue.get: qid=%d src_pid=%d msg_id=%s: chunk_id=%d: checksum=%x != checksum2=%x -- FAIL!" % (self.qid, src_pid, msg_id, chunk_id, checksum, checksum2)) # TODO: use a better exception
 
-                if not self.buf_msg_id:
-                    self.buf_msg_id = msg_id
-                if not self.buf_msg_body:
-                    self.buf_msg_body = [None] * total_chunks
-                self.buf_msg_body[chunk_id-1] = chunk_data # This copies the reference
+                buf_msg_body[i] = chunk_data # This may copy the reference.
 
-                if chunk_count == total_chunks:
-                    msg_body = b''.join(self.buf_msg_body) # This might even copy the references.
-                    if self.integrity_check:
-                        if total_msg_size == len(msg_body):
-                            if self.verbose:
-                                 print("get: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d is OK" % (self.qid, src_pid, msg_id, total_msg_size), file=sys.stderr, flush=True) # ***
-                        else:
-                            raise ValueError("get: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d != len(msg_body)=%d -- FAIL!" % (self.qid, src_pid, msg_id, total_msg_size, len(msg_body))) # TODO: use a beter exception.
-                    try:
-                        msg = self.serializer.loads(msg_body)
-                        # We could release the blocks here, but then we'd have to release
-                        # them in the except clause, too.
-                    except pickle.UnpicklingError as e:
-                        print("get: Fail: qid=%d src_pid=%d msg_id=%s: msg_size=%d chunk_id=%d total_chunks=%d." % (self.qid, src_pid, msg_id, msg_size, chunk_id, total_chunks), file=sys.stderr, flush=True) # ***
-                        if self.integrity_check:
-                            print("get: Fail: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d checksum=%x" % (self.pid, src_pid, msg_id, total_msg_size, checksum), file=sys.stderr, flush=True) # ***
-                        raise e
+            msg_body = b''.join(buf_msg_body) # Even this might copy the references.
+            if self.integrity_check:
+                if total_msg_size == len(msg_body):
+                    if self.verbose:
+                        print("get: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d is OK" % (self.qid, src_pid, msg_id, total_msg_size), file=sys.stderr, flush=True) # ***
+                    else:
+                        raise ValueError("get: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d != len(msg_body)=%d -- FAIL!" % (self.qid, src_pid, msg_id, total_msg_size, len(msg_body))) # TODO: use a beter exception.
 
-                    self.buf_msg_id = None
-                    self.buf_msg_body = None
-                    return msg
+            try:
+                msg = self.serializer.loads(msg_body) # Finally, we are guaranteed to copy the data.
+
+                # We could release the blocks here, but then we'd have to
+                # release them in the except clause, too.
+
+                return msg
+
+            except pickle.UnpicklingError as e:
+                print("get: Fail: qid=%d src_pid=%d msg_id=%s: msg_size=%d chunk_id=%d total_chunks=%d." % (self.qid, src_pid, msg_id, msg_size, chunk_id, total_chunks), file=sys.stderr, flush=True) # ***
+                if self.integrity_check:
+                    print("get: Fail: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d checksum=%x" % (self.pid, src_pid, msg_id, total_msg_size, checksum), file=sys.stderr, flush=True) # ***
+                raise
+    
         finally:
             # It is now safe to release the data blocks.  This is a good place
             # to release them, because it covers error paths as well as the main return.
+            if self.verbose:
+                print("get: qid=%d src_pid=%d msg_id=%s: releasing the data blocks." % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # ***
             for block_id in msg_block_ids:
                 with self.block_locks[block_id]:
                     self.set_meta(self.meta_blocks[block_id], self.__class__.EMPTY_MSG_ID, 'msg_id')
-            if self.verbose:
-                print("put: qid=%d: releasing consumer lock" % self.qid, file=sys.stderr, flush=True) # *** 
-            self.consumer_lock.release()
+            buf_msg_body.clear()
+            msg_block_ids.clear()
 
     def get_nowait(self):
         """
