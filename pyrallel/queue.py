@@ -82,7 +82,7 @@ class ShmQueue(mpq.Queue):
                  integrity_check: bool=False,
                  deadlock_check: bool=False,
                  deadlock_immanent_check: bool=True,
-                 watermark_check: bool = True,
+                 watermark_check: bool = False,
                  verbose: bool=False):
         ctx = mp.get_context()
 
