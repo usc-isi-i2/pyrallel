@@ -243,10 +243,13 @@ class ParallelProcessor(Paralleller):
         else:
             self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[i], None))
                               for i in range(num_of_processor)]
-        if use_shm:
-            self.progress_queues = [ShmQueue(maxsize=1) for _ in range(num_of_processor)]
+        if progress is not None:
+            if use_shm:
+                self.progress_queues = [ShmQueue(maxsize=1) for _ in range(num_of_processor)]
+            else:
+                self.progress_queues = [mp.Queue(maxsize=1) for _ in range(num_of_processor)]
         else:
-            self.progress_queues = [mp.Queue(maxsize=1) for _ in range(num_of_processor)]
+            self.progress_queues = None
         self.progress = progress
 
         ctx = self
@@ -301,6 +304,9 @@ class ParallelProcessor(Paralleller):
             q.close()
         if self.collector_queues is not None:
             for q in self.collector_queues:
+                q.close()
+        if self.progress_queues is not None:
+            for q in self.progress_queues:
                 q.close()
 
     def task_done(self):
