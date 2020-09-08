@@ -85,7 +85,7 @@ class ShmQueue(mpq.Queue):
                  chunk_size=1*1024*1024,
                  maxsize=2,
                  serializer=None,
-                 integrity_check: bool=False,
+                 integrity_check: bool=True,
                  deadlock_check: bool=False,
                  deadlock_immanent_check: bool=True,
                  watermark_check: bool = False,
@@ -118,23 +118,19 @@ class ShmQueue(mpq.Queue):
         self.producer_lock = ctx.Lock()
         self.consumer_lock = ctx.Lock()
         self.block_locks = [ctx.Lock()] * maxsize
-        self.meta_blocks = []
-        for _ in range(maxsize):
-            self.meta_blocks.append(SharedMemory(create=True, size=self.__class__.META_BLOCK_SIZE))
         self.data_blocks = []
         for _ in range(maxsize):
-            self.data_blocks.append(SharedMemory(create=True, size=self.chunk_size))
+            self.data_blocks.append(SharedMemory(create=True, size=self.__class__.META_BLOCK_SIZE + self.chunk_size))
 
     def __getstate__(self):
         return (dill.dumps(self.serializer), self.chunk_size, self.producer_lock,
-                self.consumer_lock, self.block_locks, dill.dumps(self.meta_blocks), dill.dumps(self.data_blocks))
+                self.consumer_lock, self.block_locks, dill.dumps(self.data_blocks))
 
     def __setstate__(self, state):
         (self.serializer, self.chunk_size, self.producer_lock,
-         self.consumer_lock, self.block_locks, self.meta_blocks, self.data_blocks) = state
+         self.consumer_lock, self.block_locks, self.data_blocks) = state
         self.buf_msg_id = None
         self.buf_msg_body = None
-        self.meta_blocks = dill.loads(self.meta_blocks)
         self.data_blocks = dill.loads(self.data_blocks)
         self.serializer = dill.loads(self.serializer)
 
@@ -145,6 +141,12 @@ class ShmQueue(mpq.Queue):
     def set_meta(self, block, data, type_):
         addr_s, addr_e, ctype = self.__class__.META_STRUCT.get(type_)
         block.buf[addr_s : addr_e] = struct.pack(ctype, data)
+
+    def get_data(self, block, data_size):
+        return block.buf[self.__class__.META_BLOCK_SIZE:self.__class__.META_BLOCK_SIZE+data_size]
+
+    def set_data(self, block, data, data_size):
+        block.buf[self.__class__.META_BLOCK_SIZE:self.__class__.META_BLOCK_SIZE+data_size] = data
 
     def generate_msg_id(self):
         # while True:
@@ -165,22 +167,22 @@ class ShmQueue(mpq.Queue):
         time_start = time.time()
         while True:
             with self.block_locks[i]:
-                if self.get_meta(self.meta_blocks[i], 'msg_id') == self.__class__.EMPTY_MSG_ID:
+                if self.get_meta(self.data_blocks[i], 'msg_id') == self.__class__.EMPTY_MSG_ID:
                     if looped:
                         print("next_writable_block_id: src_pid=%d qid=%d: looping ended after %d loops." % (src_pid, self.qid, loop_cnt), file=sys.stderr, flush=True) # ***
-                    meta_block = self.meta_blocks[i]
-                    self.set_meta(meta_block, msg_id, 'msg_id')
-                    self.set_meta(meta_block, src_pid, 'src_pid')
+                    data_block = self.data_blocks[i]
+                    self.set_meta(data_block, msg_id, 'msg_id')
+                    self.set_meta(data_block, src_pid, 'src_pid')
 
                     # Reserve this block for the specified message.  The
                     # reserved chunk ID won't be chunk ID 1, which would cause
                     # next_readable_msg_id(...)  to pick the block before it
                     # is ready to be read.
-                    self.set_meta(meta_block, self.__class__.RESERVED_CHUNK_ID, 'chunk_id')
+                    self.set_meta(data_block, self.__class__.RESERVED_CHUNK_ID, 'chunk_id')
                     return i
 
             i += 1
-            if i >= len(self.meta_blocks):
+            if i >= len(self.data_blocks):
                 if not block or (timeout and (time.time() - time_start) > timeout):
                     if self.verbose:
                         print("next_writable_block_id: src_pid=%d qid=%d: FULL" % (src_pid, self.qid), file=sys.stderr, flush=True) # ***
@@ -198,19 +200,19 @@ class ShmQueue(mpq.Queue):
         time_start = time.time()
         while True:
             with self.block_locks[i]:
-                meta_block = self.meta_blocks[i]
-                msg_id = self.get_meta(meta_block, 'msg_id')
+                data_block = self.data_blocks[i]
+                msg_id = self.get_meta(data_block, 'msg_id')
                 if msg_id != self.__class__.EMPTY_MSG_ID:
-                    if self.get_meta(meta_block, 'chunk_id') == 1:
+                    if self.get_meta(data_block, 'chunk_id') == 1:
 
                         # Reserve this chunk (and thus, this message) for
                         # eading by the current process by changing its
                         # chunk_id from 1 to the reserved chunk ID.
-                        self.set_meta(meta_block, self.__class__.RESERVED_CHUNK_ID, 'chunk_id')
-                        return self.get_meta(meta_block, 'src_pid'), msg_id, i, self.get_meta(meta_block, 'total_chunks')
+                        self.set_meta(data_block, self.__class__.RESERVED_CHUNK_ID, 'chunk_id')
+                        return self.get_meta(data_block, 'src_pid'), msg_id, i, self.get_meta(data_block, 'total_chunks')
 
             i += 1
-            if i >= len(self.meta_blocks):
+            if i >= len(self.data_blocks):
                 if not block or (timeout and (time.time() - time_start) > timeout):
                     raise Empty
                 i = 0
@@ -219,18 +221,18 @@ class ShmQueue(mpq.Queue):
         i = 0
         while True:
             with self.block_locks[i]:
-                meta_block = self.meta_blocks[i]
-                if self.get_meta(meta_block, 'msg_id') == msg_id:
-                    if self.get_meta(meta_block, 'chunk_id') == chunk_id:
-                        if self.get_meta(meta_block, 'src_pid') == src_pid:
+                data_block = self.data_blocks[i]
+                if self.get_meta(data_block, 'msg_id') == msg_id:
+                    if self.get_meta(data_block, 'chunk_id') == chunk_id:
+                        if self.get_meta(data_block, 'src_pid') == src_pid:
                             return i
 
             i += 1
-            if i >= len(self.meta_blocks):
+            if i >= len(self.data_blocks):
                 i = 0
 
-    # def debug_meta_block(self):
-    #     for b in self.meta_blocks:
+    # def debug_data_block(self):
+    #     for b in self.data_blocks:
     #         print(bytes(b.buf[0:24]))
 
     def put(self, msg, block=True, timeout=None):
@@ -293,8 +295,8 @@ class ShmQueue(mpq.Queue):
                         print("put: qid=%d src_pid=%d msg_id=%s: releasing %d blocks" % (self.qid, src_pid, msg_id, len(block_id_list)), file=sys.stderr, flush=True) # ***
                     for block_id in block_id_list:
                         with self.block_locks[block_id]:
-                            meta_block = self.meta_blocks[block_id]
-                            self.set_meta(meta_block, self.__class__.EMPTY_MSG_ID, 'msg_id')
+                            data_block = self.data_blocks[block_id]
+                            self.set_meta(data_block, self.__class__.EMPTY_MSG_ID, 'msg_id')
                     raise # Note: a message ID has been consumed by the failed attempt.
 
             if self.verbose:
@@ -316,7 +318,7 @@ class ShmQueue(mpq.Queue):
                 if self.verbose:
                     print("put: qid=%d src_pid=%d msg_id=%s: chunk_id=%d of total_chunks=%d" % (self.qid, src_pid, msg_id, chunk_id, total_chunks), file=sys.stderr, flush=True) # *** 
                
-                meta_block, data_block = self.meta_blocks[block_id], self.data_blocks[block_id]
+                data_block = self.data_blocks[block_id]
                 chunk_data = msg_body[i * self.chunk_size: (i + 1) * self.chunk_size]
                 msg_size = len(chunk_data)
                 if self.verbose:
@@ -327,14 +329,14 @@ class ShmQueue(mpq.Queue):
                         print("put: qid=%d src_pid=%d msg_id=%s: chunk_id=%d: checksum=%x total_msg_size=%d" % (self.qid, src_pid, msg_id, chunk_id, checksum, total_msg_size), file=sys.stderr, flush=True) # ***
 
                 with self.block_locks[block_id]:
-                    self.set_meta(meta_block, msg_id, 'msg_id')
-                    self.set_meta(meta_block, msg_size, 'msg_size')
-                    self.set_meta(meta_block, chunk_id, 'chunk_id')
-                    self.set_meta(meta_block, total_chunks, 'total_chunks')
+                    self.set_meta(data_block, msg_id, 'msg_id')
+                    self.set_meta(data_block, msg_size, 'msg_size')
+                    self.set_meta(data_block, chunk_id, 'chunk_id')
+                    self.set_meta(data_block, total_chunks, 'total_chunks')
                     if self.integrity_check:
-                        self.set_meta(meta_block, total_msg_size, 'total_msg_size')
-                        self.set_meta(meta_block, checksum, 'checksum')                        
-                    data_block.buf[0:msg_size] = chunk_data
+                        self.set_meta(data_block, total_msg_size, 'total_msg_size')
+                        self.set_meta(data_block, checksum, 'checksum')                        
+                    self.set_data(data_block, chunk_data, msg_size)
         finally:
             if self.verbose:
                 print("put: qid=%d src_pid=%d msg_id=%s: message sent" % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # *** 
@@ -387,7 +389,7 @@ class ShmQueue(mpq.Queue):
                 print("put: qid=%d: releasing data blocks due to Exception" % self.qid, file=sys.stderr, flush=True) # *** 
             for block_id in msg_block_ids:
                 with self.block_locks[block_id]:
-                    self.set_meta(self.meta_blocks[block_id], self.__class__.EMPTY_MSG_ID, 'msg_id')
+                    self.set_meta(self.data_blocks[block_id], self.__class__.EMPTY_MSG_ID, 'msg_id')
             msg_block_ids.clear()
             raise
 
@@ -402,15 +404,14 @@ class ShmQueue(mpq.Queue):
         try:
             for i, block_id in enumerate(msg_block_ids):
                 chunk_id = i + 1
-                meta_block = self.meta_blocks[block_id]
                 data_block = self.data_blocks[block_id]
                 with self.block_locks[block_id]:
-                    msg_size = self.get_meta(meta_block, 'msg_size')
+                    msg_size = self.get_meta(data_block, 'msg_size')
                     if self.integrity_check:
                         if i == 0:
-                            total_msg_size = self.get_meta(meta_block, 'total_msg_size')
-                        checksum = self.get_meta(meta_block, 'checksum')
-                    chunk_data = data_block.buf[0:msg_size] # This may make a reference, not a deep copy.
+                            total_msg_size = self.get_meta(data_block, 'total_msg_size')
+                        checksum = self.get_meta(data_block, 'checksum')
+                    chunk_data = self.get_data(data_block, msg_size) # This may make a reference, not a deep copy.
                 if self.verbose:
                     print("get: qid=%d src_pid=%d msg_id=%s: chunk_id=%d: msg_size=%d total_chunks=%d." % (self.qid, src_pid, msg_id, chunk_id, msg_size, total_chunks), file=sys.stderr, flush=True) # ***
                 if self.integrity_check:
@@ -428,8 +429,8 @@ class ShmQueue(mpq.Queue):
                 if total_msg_size == len(msg_body):
                     if self.verbose:
                         print("get: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d is OK" % (self.qid, src_pid, msg_id, total_msg_size), file=sys.stderr, flush=True) # ***
-                    else:
-                        raise ValueError("get: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d != len(msg_body)=%d -- FAIL!" % (self.qid, src_pid, msg_id, total_msg_size, len(msg_body))) # TODO: use a beter exception.
+                else:
+                    raise ValueError("get: qid=%d src_pid=%d msg_id=%s: total_msg_size=%d != len(msg_body)=%d -- FAIL!" % (self.qid, src_pid, msg_id, total_msg_size, len(msg_body))) # TODO: use a beter exception.
 
             try:
                 msg = self.serializer.loads(msg_body) # Finally, we are guaranteed to copy the data.
@@ -452,7 +453,7 @@ class ShmQueue(mpq.Queue):
                 print("get: qid=%d src_pid=%d msg_id=%s: releasing the data blocks." % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # ***
             for block_id in msg_block_ids:
                 with self.block_locks[block_id]:
-                    self.set_meta(self.meta_blocks[block_id], self.__class__.EMPTY_MSG_ID, 'msg_id')
+                    self.set_meta(self.data_blocks[block_id], self.__class__.EMPTY_MSG_ID, 'msg_id')
             buf_msg_body.clear()
             msg_block_ids.clear()
 
@@ -481,9 +482,6 @@ class ShmQueue(mpq.Queue):
         """
         Indicate no more new data will be added and release the shared memory.
         """
-        for block in self.meta_blocks:
-            block.close()
-            block.unlink()
         for block in self.data_blocks:
             block.close()
             block.unlink()
