@@ -594,5 +594,8 @@ class ShmQueue(mpq.Queue):
             block.close()
             block.unlink()
 
+        self.list_heads.close()
+        self.list_heads.unlink()
+
     def __del__(self):
         pass
