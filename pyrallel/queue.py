@@ -66,8 +66,6 @@ class ShmQueue(mpq.Queue):
     MAX_CHUNK_SIZE = 512 * 1024 * 1024  # system limit is 2G, 512MB is enough
 
     # if msg_id is empty, the block is considered as empty
-    EMPTY_MSG_ID = b'\x00' * 12
-    RESERVED_CHUNK_ID = 0
     RESERVED_BLOCK_ID = 0xffffffff
     META_STRUCT = {
         'msg_id': (0, 12, '12s'),
@@ -269,10 +267,6 @@ class ShmQueue(mpq.Queue):
             self.add_block(self.__class__.MSG_LIST_HEAD, block_id)
         
     def generate_msg_id(self):
-        # while True:
-        #     cand = str(uuid.uuid4())[-12:].encode('utf-8')
-        #     if cand != self.__class__.EMPTY_MSG_ID:
-        #         return cand
         return ("%012x" % (self.mid_counter + 1)).encode('utf-8')
 
     def consume_msg_id(self):
