@@ -9,6 +9,7 @@ import os
 import struct
 import sys
 import time
+import typing
 import dill
 import zlib
 
@@ -99,6 +100,7 @@ class ShmQueue(mpq.Queue):
                  deadlock_check: bool=False,
                  deadlock_immanent_check: bool=True,
                  watermark_check: bool = False,
+                 use_semaphores: bool = True,
                  verbose: bool=False):
         ctx = mp.get_context()
 
@@ -128,6 +130,14 @@ class ShmQueue(mpq.Queue):
         self.producer_lock = ctx.Lock()
         self.free_list_lock = ctx.Lock()
         self.msg_list_lock = ctx.Lock()
+
+        self.use_semaphores: bool = use_semaphores
+        if use_semaphores:
+            self.free_list_semaphore = ctx.Semaphore(0)
+            self.msg_list_semaphore = ctx.Semaphore(0)
+        else:
+            self.free_list_semaphore = None
+            self.msg_list_semaphore = None
         
         self.list_heads = SharedMemory(create=True, size=self.__class__.LIST_HEAD_SIZE * 2)
         self.init_list_head(self.__class__.FREE_LIST_HEAD)
@@ -154,6 +164,9 @@ class ShmQueue(mpq.Queue):
                 self.producer_lock,
                 self.free_list_lock,
                 self.msg_list_lock,
+                self.use_semaphores,
+                self.free_list_semaphore,
+                self.msg_list_semaphore,
                 dill.dumps(self.list_heads),
                 self.block_locks,
                 dill.dumps(self.data_blocks))
@@ -173,6 +186,9 @@ class ShmQueue(mpq.Queue):
          self.producer_lock,
          self.free_list_lock,
          self.msg_list_lock,
+         self.use_semaphores,
+         self.free_list_semaphore,
+         self.msg_list_semaphore,
          self.list_heads,
          self.block_locks,
          self.data_blocks) = state
@@ -246,25 +262,33 @@ class ShmQueue(mpq.Queue):
         with self.free_list_lock:
             return self.get_block_count(self.__class__.FREE_LIST_HEAD)
 
-    def get_first_free_block(self):
+    def get_first_free_block(self, block: bool, timeout: typing.Optional[float]):
+        if self.free_list_semaphore is not None:
+            self.free_list_semaphore.acquire(block=block, timeout=timeout)
         with self.free_list_lock:
             return self.get_first_block(self.__class__.FREE_LIST_HEAD)
 
-    def add_free_block(self, block_id):
+    def add_free_block(self, block_id: int):
         with self.free_list_lock:
             self.add_block(self.__class__.FREE_LIST_HEAD, block_id)
+        if self.free_list_semaphore is not None:
+            self.free_list_semaphore.release()
 
     def get_msg_count(self):
         with self.msg_list_lock:
             return self.get_block_count(self.__class__.MSG_LIST_HEAD)
 
-    def get_first_msg(self):
+    def get_first_msg(self, block: bool, timeout: typing.Optional[float]):
+        if self.msg_list_semaphore is not None:
+            self.msg_list_semaphore.acquire(block=block, timeout=timeout)
         with self.msg_list_lock:
             return self.get_first_block(self.__class__.MSG_LIST_HEAD)
 
     def add_msg(self, block_id):
         with self.msg_list_lock:
             self.add_block(self.__class__.MSG_LIST_HEAD, block_id)
+        if self.msg_list_semaphore is not None:
+            self.msg_list_semaphore.release()
         
     def generate_msg_id(self):
         return ("%012x" % (self.mid_counter + 1)).encode('utf-8')
@@ -272,28 +296,36 @@ class ShmQueue(mpq.Queue):
     def consume_msg_id(self):
         self.mid_counter += 1
 
-    def next_writable_block_id(self, block, timeout, msg_id, src_pid):
+    def next_writable_block_id(self, block: bool, timeout: typing.Optional[float], msg_id, src_pid):
         looped: bool = False
         loop_cnt: int = 0
         time_start = time.time()
         while True:
-            block_id = self.get_first_free_block()
+            remaining_timeout = timeout
+            if remaining_timeout is not None:
+                remaining_timeout -= (time.time() - time_start)
+                if remaining_timeout <= 0:
+                    if self.verbose:
+                        print("next_writable_block_id: qid=%d src_pid=%d: queue FULL (timeout)" % (self.qid, src_pid), file=sys.stderr, flush=True) # ***
+                    raise Full
+
+            block_id = self.get_first_free_block(block, remaining_timeout)
             if block_id is not None:
                 break
 
-            if not block or (timeout and (time.time() - time_start) > timeout):
+            if not block:
                 if self.verbose:
-                    print("next_writable_block_id: src_pid=%d qid=%d: FULL" % (src_pid, self.qid), file=sys.stderr, flush=True) # ***
+                    print("next_writable_block_id: qid=%d src_pid=%d: FULL (nonblocking)" % (self.qid, src_pid), file=sys.stderr, flush=True) # ***
                 raise Full
 
             if self.deadlock_check or self.verbose:
                 loop_cnt += 1
                 if (self.verbose and loop_cnt == 2) or (self.deadlock_check and loop_cnt % 10000 == 0):
                     looped = True
-                    print("next_writable_block_id: src_pid=%d qid=%d: looping (%d loops)" % (src_pid, self.qid, loop_cnt), file=sys.stderr, flush=True) # ***
+                    print("next_writable_block_id: qid=%d src_pid=%d: looping (%d loops)" % (self.qid, src_pid, loop_cnt), file=sys.stderr, flush=True) # ***
 
         if looped:
-            print("next_writable_block_id: src_pid=%d qid=%d: looping ended after %d loops." % (src_pid, self.qid, loop_cnt), file=sys.stderr, flush=True) # ***
+            print("next_writable_block_id: qid=%d src_pid=%d: looping ended after %d loops." % (self.qid, src_pid, loop_cnt), file=sys.stderr, flush=True) # ***
 
         with self.block_locks[block_id]:
             data_block = self.data_blocks[block_id]
@@ -302,15 +334,20 @@ class ShmQueue(mpq.Queue):
 
         return block_id
 
-    def next_readable_msg(self, block, timeout):
+    def next_readable_msg(self, block: bool, timeout: typing.Optional[float]):
         i = 0
         time_start = time.time()
         while True:
-            block_id = self.get_first_msg()
+            remaining_timeout = timeout
+            if remaining_timeout is not None:
+                remaining_timeout -= (time.time() - time_start)
+                if remaining_timeout <= 0:
+                    raise Empty
+            block_id = self.get_first_msg(block=block, timeout=remaining_timeout)
             if block_id is not None:
                 break
 
-            if not block or (timeout and (time.time() - time_start) > timeout):
+            if not block:
                 raise Empty
             
         with self.block_locks[block_id]:
@@ -383,13 +420,13 @@ class ShmQueue(mpq.Queue):
             block_id_list: typing.List[int] = [ ]
             for i in range(total_chunks):
                 try:
-                    remaining_timeout =timeout
+                    remaining_timeout = timeout
                     if remaining_timeout is not None:
                         remaining_timeout -= (time.time() - time_start)
-                        if remaining_timeout < 0:
+                        if remaining_timeout <= 0:
                             if self.verbose:
                                 print("put: qid=%d src_pid=%d msg_id=%s: queue FULL" % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # ***
-                            raise Full # Note: a message ID has been consumed by the failed attempt.
+                            raise Full
 
                     block_id = self.next_writable_block_id(block, remaining_timeout, msg_id, src_pid)
                     block_id_list.append(block_id)
@@ -479,10 +516,10 @@ class ShmQueue(mpq.Queue):
             remaining_timeout = timeout
             if remaining_timeout is not None:
                 remaining_timeout -= (time.time() - time_start)
-                if remaining_timeout < 0:
+                if remaining_timeout <= 0:
                     if self.verbose:
                         print("put: qid=%d src_pid=%d msg_id=%s: queue EMPTY" % (self.qid, src_pid, msg_id), file=sys.stderr, flush=True) # ***
-                    raise Empty # Note: a message ID has been consumed by the failed attempt.
+                    raise Empty
 
             src_pid, msg_id, block_id, total_chunks, next_chunk_block_id = self.next_readable_msg(block, remaining_timeout) # This call might raise Empty.
             if self.verbose:
