@@ -342,7 +342,7 @@ class ShmQueue(mpq.Queue):
         if timeout is not None:
             if not block:
                 raise ValueError("A timeout is allowed only when not blocking.")
-            if tiemout < 0:
+            if timemout < 0:
                 raise Full
 
         msg_id = self.generate_msg_id()
