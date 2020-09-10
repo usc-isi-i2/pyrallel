@@ -222,27 +222,43 @@ class ParallelProcessor(Paralleller):
 
     def __init__(self, num_of_processor: int, mapper: Callable, max_size_per_mapper_queue: int = 0,
                  collector: Callable = None, max_size_per_collector_queue: int = 0,
-                 enable_process_id: bool = False, batch_size: int = 1, progress=None, use_shm=False, enable_collector_queues=True):
+                 enable_process_id: bool = False, batch_size: int = 1, progress=None, use_shm=False, enable_collector_queues=True,
+                 single_mapper_queue: bool = False):
         self.num_of_processor = num_of_processor
+        self.single_mapper_queue = single_mapper_queue
         if use_shm:
-            self.mapper_queues = [ShmQueue(maxsize=max_size_per_mapper_queue) for _ in range(num_of_processor)]
+            if single_mapper_queue:
+                self.mapper_queues = [ShmQueue(maxsize=max_size_per_mapper_queue * num_of_processor)]
+            else:
+                self.mapper_queues = [ShmQueue(maxsize=max_size_per_mapper_queue) for _ in range(num_of_processor)]
             if enable_collector_queues:
                 self.collector_queues = [ShmQueue(maxsize=max_size_per_collector_queue) for _ in range(num_of_processor)]
             else:
                 self.collector_queues = None
         else:
-            self.mapper_queues = [mp.Queue(maxsize=max_size_per_mapper_queue) for _ in range(num_of_processor)]
+            if single_mapper_queue:
+                self.mapper_queues = [mp.Queue(maxsize=max_size_per_mapper_queue * num_of_processor)]
+            else:
+                self.mapper_queues = [mp.Queue(maxsize=max_size_per_mapper_queue) for _ in range(num_of_processor)]
             if enable_collector_queues:
                 self.collector_queues = [mp.Queue(maxsize=max_size_per_collector_queue) for _ in range(num_of_processor)]
             else:
                 self.collector_queues = None
                 
         if enable_collector_queues:
-            self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[i], self.collector_queues[i]))
-                              for i in range(num_of_processor)]
+            if single_mapper_queue:
+                self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[0], self.collector_queues[i]))
+                                  for i in range(num_of_processor)]
+            else:
+                self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[i], self.collector_queues[i]))
+                                  for i in range(num_of_processor)]
         else:
-            self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[i], None))
-                              for i in range(num_of_processor)]
+            if single_mapper_queue:
+                self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[0], None))
+                                  for i in range(num_of_processor)]
+            else:
+                self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[i], None))
+                                  for i in range(num_of_processor)]
         if progress is not None:
             if use_shm:
                 self.progress_queues = [ShmQueue(maxsize=1) for _ in range(num_of_processor)]
@@ -318,8 +334,11 @@ class ParallelProcessor(Paralleller):
             self._add_task(self.batch_data)
             self.batch_data = []
 
-        for q in self.mapper_queues:
-            q.put((ParallelProcessor.CMD_STOP,))
+        for i in range(self.num_of_processor):
+            if self.single_mapper_queue:
+                self.mapper_queues[0].put((ParallelProcessor.CMD_STOP,))
+            else:
+                self.mapper_queues[i].put((ParallelProcessor.CMD_STOP,))
 
     def add_task(self, *args, **kwargs):
         """
@@ -335,14 +354,17 @@ class ParallelProcessor(Paralleller):
             self.batch_data = []  # reset buffer
 
     def _add_task(self, batched_args):
-        while True:
-            q = self.mapper_queues[self.mapper_queue_index]
-            self.mapper_queue_index = (self.mapper_queue_index + 1) % self.num_of_processor
-            try:
-                q.put_nowait((ParallelProcessor.CMD_DATA, batched_args))
-                return  # put in
-            except queue.Full:
-                continue  # find next available
+        if self.single_mapper_queue:
+            self.mapper_queues[0].put((ParallelProcessor.CMD_DATA, batched_args))
+        else:
+            while True:
+                q = self.mapper_queues[self.mapper_queue_index]
+                self.mapper_queue_index = (self.mapper_queue_index + 1) % self.num_of_processor
+                try:
+                    q.put_nowait((ParallelProcessor.CMD_DATA, batched_args))
+                    return  # put in
+                except queue.Full:
+                    continue  # find next available
 
     def _run(self, idx: int, mapper_queue: mp.Queue, collector_queue: typing.Optional[mp.Queue]):
         """
