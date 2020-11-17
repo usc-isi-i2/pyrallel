@@ -91,11 +91,14 @@ import multiprocess as mp
 import threading
 import queue
 import inspect
+import sys
 import typing
 from typing import Callable, Iterable
 
-from pyrallel import Paralleller, ShmQueue
+from pyrallel import Paralleller
 
+if sys.version_info >= (3, 8):
+    from pyrallel import ShmQueue
 
 class Mapper(object):
     """
@@ -226,15 +229,22 @@ class ParallelProcessor(Paralleller):
                  single_mapper_queue: bool = False):
         self.num_of_processor = num_of_processor
         self.single_mapper_queue = single_mapper_queue
+        if sys.version_info >= (3, 8):
+            self.collector_queues: typing.Optional[typing.Union[ShmQueue, mp.Queue]]
+        else:
+            self.collector_queues: typing.Optional[mp.Queue]
         if use_shm:
-            if single_mapper_queue:
-                self.mapper_queues = [ShmQueue(maxsize=max_size_per_mapper_queue * num_of_processor)]
+            if sys.version_info >= (3, 8):
+                if single_mapper_queue:
+                    self.mapper_queues = [ShmQueue(maxsize=max_size_per_mapper_queue * num_of_processor)]
+                else:
+                    self.mapper_queues = [ShmQueue(maxsize=max_size_per_mapper_queue) for _ in range(num_of_processor)]
+                if enable_collector_queues:
+                    self.collector_queues = [ShmQueue(maxsize=max_size_per_collector_queue) for _ in range(num_of_processor)]
+                else:
+                    self.collector_queues = None
             else:
-                self.mapper_queues = [ShmQueue(maxsize=max_size_per_mapper_queue) for _ in range(num_of_processor)]
-            if enable_collector_queues:
-                self.collector_queues = [ShmQueue(maxsize=max_size_per_collector_queue) for _ in range(num_of_processor)]
-            else:
-                self.collector_queues = None
+                raise ValueError("shm not available in this version of Python.")
         else:
             if single_mapper_queue:
                 self.mapper_queues = [mp.Queue(maxsize=max_size_per_mapper_queue * num_of_processor)]
@@ -245,7 +255,7 @@ class ParallelProcessor(Paralleller):
             else:
                 self.collector_queues = None
                 
-        if enable_collector_queues:
+        if self.collector_queues is not None:
             if single_mapper_queue:
                 self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[0], self.collector_queues[i]))
                                   for i in range(num_of_processor)]
@@ -260,8 +270,15 @@ class ParallelProcessor(Paralleller):
                 self.processes = [mp.Process(target=self._run, args=(i, self.mapper_queues[i], None))
                                   for i in range(num_of_processor)]
         if progress is not None:
+            if sys.version_info >= (3, 8):
+                self.progress_queues: typing.Optional[typing.Union[ShmQueue, mp.Queue]]
+            else:
+                self.progress_queues: typing.Optional[mp.Queue]
             if use_shm:
-                self.progress_queues = [ShmQueue(maxsize=1) for _ in range(num_of_processor)]
+                if sys.version_info >= (3, 8):
+                    self.progress_queues = [ShmQueue(maxsize=1) for _ in range(num_of_processor)]
+                else:
+                    raise ValueError("shm not available in this version of Python.")
             else:
                 self.progress_queues = [mp.Queue(maxsize=1) for _ in range(num_of_processor)]
         else:
@@ -377,7 +394,7 @@ class ParallelProcessor(Paralleller):
                 if data[0] == ParallelProcessor.CMD_STOP:
                     # print(idx, 'stop')
                     self._update_progress(mapper, finish=True)
-                    if self.collector:
+                    if self.collector and collector_queue is not None:
                         collector_queue.put((ParallelProcessor.CMD_STOP,))
                     return
                 elif data[0] == ParallelProcessor.CMD_DATA:
