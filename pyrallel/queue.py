@@ -57,12 +57,6 @@ class ShmQueue(mpq.Queue):
             q.put(100)
             p.join()
             q.close()
-
-
-    Problem:  There is no guarantee that messages will be delivered in order.
-    That means that if you have a START, DATA..., SHUTDOWN sequence, the first
-    DATA might be delivered before the START, and the SHUTDOWN may be delivered
-    before the last DATA.
     """
     MAX_CHUNK_SIZE = 512 * 1024 * 1024  # system limit is 2G, 512MB is enough
 
