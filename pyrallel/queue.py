@@ -254,7 +254,9 @@ class ShmQueue(mpq.Queue):
         addr_s, addr_e, ctype = self.__class__.LIST_HEAD_STRUCT.get(type_, (None, None, None))
         if addr_s is None or addr_e is None or ctype is None:
             raise ValueError("get_list_head_field: unrecognized %s" % repr(type_))
-        self.list_heads.buf[(self.__class__.LIST_HEAD_SIZE * lh) + addr_s : (self.__class__.LIST_HEAD_SIZE * lh) + addr_e] = struct.pack(ctype, data)
+
+        # TODO: find a better way to calm mypy's annoyance at the following:
+        self.list_heads.buf[(self.__class__.LIST_HEAD_SIZE * lh) + addr_s : (self.__class__.LIST_HEAD_SIZE * lh) + addr_e] = struct.pack(ctype, data) #type: ignore
 
     def get_meta(self, block: SharedMemory, type_: str):
         addr_s: typing.Optional[int]
@@ -272,13 +274,16 @@ class ShmQueue(mpq.Queue):
         addr_s, addr_e, ctype = self.__class__.META_STRUCT.get(type_, (None, None, None))
         if addr_s is None or addr_e is None or ctype is None:
             raise ValueError("set_meta: unrecognized %s" % repr(type_))
-        block.buf[addr_s : addr_e] = struct.pack(ctype, data)
+
+        # TODO: find a better way to calm mypy's annoyance at the following:
+        block.buf[addr_s : addr_e] = struct.pack(ctype, data) #type: ignore
 
     def get_data(self, block: SharedMemory, data_size: int)->bytes:
         return block.buf[self.__class__.META_BLOCK_SIZE:self.__class__.META_BLOCK_SIZE+data_size]
 
     def set_data(self, block: SharedMemory, data: bytes, data_size: int):
-        block.buf[self.__class__.META_BLOCK_SIZE:self.__class__.META_BLOCK_SIZE+data_size] = data
+        # TODO: find a better way to calm mypy's annoyance at the following:
+        block.buf[self.__class__.META_BLOCK_SIZE:self.__class__.META_BLOCK_SIZE+data_size] = data # type: ignore
 
     def init_list_head(self, lh: int):
         self.set_list_head_field(lh, 0, 'block_count')
