@@ -39,10 +39,25 @@ class ShmQueue(mpq.Queue):
                                 If it is None (default), pickle will be used. \
                                 The serialize should have implemented `loads(bytes data) -> object` \
                                 and `dumps(object obj) -> bytes`.
+        integrity_check (bool, optional): When True, perform certain integrity checks on messages.
+                                1) After serializing a message, immediately deserialize it to check for validity.
+                                2) Save the length of a message after serialization.
+                                3) Compute a checksum of each chunk.
+                                4) Include the total message size and chunk checksum in the metadata for each chunk.
+                                5) When pulling a chunk from the queue, verify the chunk checksum.
+                                6) After reassembling a message out of chunks, verify the total message size.
+        deadlock_check (bool, optional): When fetching a writable block, print a message if two or more
+                                loops are needed to get a free block. (default is False)
+        deadlock_immanent_check (bool, optional): Raise a ValueError if a message submitted to
+                                put(...) is too large to process.  (Default is True)
+        watermark_check (bool, optional): When true, prit a mesage with the largest message size in chunks.
+        use_semaphores (bool, optional): When true, use semaphores to control access to the free list and the 
+                                message list. The system will sleep when accessing these shared resources,
+                                instead of entering a polling loop.
 
     Note:
         - `close` needs to be invoked once to release memory and avoid memory leak.
-        - `qsize`, `empty` and `full` are not currently implemented since they are not reliable in multiprocessing.
+        - `qsize`, `empty` and `full` are implemented but may block.
 
     Example::
 
@@ -126,12 +141,13 @@ class ShmQueue(mpq.Queue):
         self.msg_list_lock = ctx.Lock()
 
         self.use_semaphores: bool = use_semaphores
-        if use_semaphores:
-            self.free_list_semaphore = ctx.Semaphore(0)
-            self.msg_list_semaphore = ctx.Semaphore(0)
-        else:
+        if not use_semaphores:
+            # Put the None case first to make mypy happier.
             self.free_list_semaphore = None
             self.msg_list_semaphore = None
+        else:
+            self.free_list_semaphore = ctx.Semaphore(0)
+            self.msg_list_semaphore = ctx.Semaphore(0)
         
         self.list_heads = SharedMemory(create=True, size=self.__class__.LIST_HEAD_SIZE * 2)
         self.init_list_head(self.__class__.FREE_LIST_HEAD)
