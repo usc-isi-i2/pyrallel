@@ -23,13 +23,24 @@ else:
 
 
 class ShmQueue(mpq.Queue):
-    """
-    ShmQueue depends on shared memory instead of pipe to efficiently exchange data among processes.
+    """ShmQueue depends on shared memory instead of pipe to efficiently exchange data among processes.
     Shared memory is "System V style" memory blocks which can be shared and accessed directly by processes.
     This implementation is based on `multiprocessing.shared_memory.SharedMemory` hence requires Python >= 3.8.
     Its interface is almost identical to `multiprocessing.queue <https://docs.python.org/3.8/library/multiprocessing.html#multiprocessing.Queue>`_.
     But it allows one to specify the serializer, which by default is pickle.
 
+    This implementation maintains two lists:  a free buffer list, and a ready message list.
+    The list heads for both lists are stored in a single shared memory area.
+
+    The free buffer list is linked by the next_block_id field in each shared
+    buffer's metadata area.
+
+    Messages are built out of chunks.  Each chunk occupies a single buffer.
+    Each chunk contains a pointer (an integer identifier) to the next chunk's
+    buffer using the next_chunk_block_id field in the shared buffer's metadata
+    area. The list of ready messages links the first chunk of each ready
+    message using the next_block_id field in the shared buffer's metadata
+    area.
 
     Args:
         chunk_size (int, optional): Size of each chunk. By default, it is 1*1024*1024.
@@ -58,6 +69,16 @@ class ShmQueue(mpq.Queue):
     Note:
         - `close` needs to be invoked once to release memory and avoid a memory leak.
         - `qsize`, `empty` and `full` are implemented but may block.
+        - Each shared queue consumes one chared memory area for the shared list heads
+          and one shared memory area for each shared buffer.  The underlying code in
+          multiprocessing.shared_memory.SharedMemory consumes one process file descriptor
+          for each shared memory area.  There is a limit ont he number of file descriptors
+          that a process may have open.
+        - Thus, there is a tradeoff between the chunk_size and maxsize:  smaller chunks
+          use memory more effectively with some overhead cost, but may run into the limit
+          on the number of open file descriptors to process large messages and avoid blocking.
+          Larger chunks waste unused space, mut are less likely to run into the open file descriptor
+          limit or to block waiting for a free buffer.
 
     Example::
 
@@ -72,6 +93,7 @@ class ShmQueue(mpq.Queue):
             q.put(100)
             p.join()
             q.close()
+
     """
 
     MAX_CHUNK_SIZE: int = 512 * 1024 * 1024
@@ -191,6 +213,7 @@ class ShmQueue(mpq.Queue):
             self.add_free_block(block_id)
 
     def __getstate__(self):
+        """This routine retrieves queue information when forking a new process."""
         return (self.qid,
                 self.verbose,
                 self.chunk_size,
@@ -213,6 +236,7 @@ class ShmQueue(mpq.Queue):
                 dill.dumps(self.data_blocks))
 
     def __setstate__(self, state):
+        """This routine saves queue information when forking a new process."""
         (self.qid,
          self.verbose,
          self.chunk_size,
@@ -486,7 +510,7 @@ class ShmQueue(mpq.Queue):
             src_pid: The process ID (pid) of the process that is acquiring the block.
 
         Raises:
-            Full: No block is available.  Full is raised immediately in nonblocking
+            queue.Full: No block is available.  Full is raised immediately in nonblocking
                mode, or after the timeout in blocking mode when a timeout is specified.
 
         """
@@ -549,7 +573,7 @@ class ShmQueue(mpq.Queue):
             next_chunk_block_id (int): The identifier for the next chunk in the message.
 
         Raises:
-            Empty: no messages are available and either nonblocking mode or a timeout occured.
+            queue.Empty: no messages are available and either nonblocking mode or a timeout occured.
             ValueError: An internal error occured in accessing the message's metadata.
         """
         i = 0
@@ -592,8 +616,17 @@ class ShmQueue(mpq.Queue):
             block (bool, optional): If it is set to True (default), it will return after an item is put into queue.
             timeout (int, optional): It can be any positive integer and only effective when `block` is set to True.
 
+        Raises:
+            queue.Full: Raised if the call times out or the queue is full when `block` is False.
+            ValueError: An internal error occured in accessing the message's metadata.
+            PicklingError: This exception is raised when the serializer is pickle and
+                an error occured in serializing the message.
+            UnpicklingError: This exception is raised when the serializer is pickle and
+                an error occured in deserializing the message for an integrity check.
+
         Note:
-            `queue.Full` exception will be raised if it times out or queue is full when `block` is False.
+            - Errors other then PicklingError might be raised if a serialized other then
+              pickle is specified.
         """
         if timeout is not None:
             if not block:
@@ -716,7 +749,7 @@ class ShmQueue(mpq.Queue):
 
     def get(self, block: bool=True, timeout: typing.Optional[float]=None)->typing.Any:
         """
-        Return data from queue.
+        Get the next available message from the queue.
 
         Args:
             block (bool, optional): If it is set to True (default), it will only return when an item is available.
@@ -725,8 +758,15 @@ class ShmQueue(mpq.Queue):
         Returns:
             object: Object.
 
+        Raises:
+            queue.Empty: This exception will be raised if it times out or queue is empty when `block` is False.
+            ValueError: An internal error occured in accessing the message's metadata.
+            UnpicklingError: This exception is raised when the serializer is pickle and
+                an error occured in deserializing the message.
+
         Note:
-            `queue.Empty` exception will be raised if it times out or queue is empty when `block` is False.
+            - Errors other then UnpicklingError might be raised if a serialized other then
+              pickle is specified.
         """
         time_start: float = time.time()
 
@@ -863,17 +903,20 @@ class ShmQueue(mpq.Queue):
         return self.put(msg, False)
 
     def qsize(self)->int:
+        """int: Return the number of ready messages."""
         return self.get_msg_count()
 
     def empty(self)->bool:
+        """bool: True when no messages are ready."""
         return self.get_msg_count() == 0
 
     def full(self)->bool:
+        """bool: True when no free blocks are available."""
         return self.get_free_block_count() == 0
 
     def close(self):
         """
-        Indicate no more new data will be added and release the shared memory.
+        Indicate no more new data will be added and release the shared memory areas.
         """
         block: SharedMemory
         for block in self.data_blocks:
