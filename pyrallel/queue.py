@@ -238,7 +238,11 @@ class ShmQueue(mpq.Queue):
         self.data_blocks = dill.loads(self.data_blocks)
         self.serializer = dill.loads(self.serializer)
 
-    def get_list_head_field(self, lh: int, type_)->int:
+    def get_list_head_field(self, lh: int, type_: str)->int:
+        """int: Get a field from a mlist head.
+        Args:
+            lh (int): The index of the list head in the list head shaed memory.
+            type (str): The name of the list head field."""
         addr_s: typing.Optional[int]
         addr_e: typing.Optional[int]
         ctype: typing.Optional[str]
@@ -258,7 +262,7 @@ class ShmQueue(mpq.Queue):
         # TODO: find a better way to calm mypy's annoyance at the following:
         self.list_heads.buf[(self.__class__.LIST_HEAD_SIZE * lh) + addr_s : (self.__class__.LIST_HEAD_SIZE * lh) + addr_e] = struct.pack(ctype, data) #type: ignore
 
-    def get_meta(self, block: SharedMemory, type_: str):
+    def get_meta(self, block: SharedMemory, type_: str)->typing.Union[bytes, int]:
         addr_s: typing.Optional[int]
         addr_e: typing.Optional[int]
         ctype: typing.Optional[str]
@@ -305,20 +309,24 @@ class ShmQueue(mpq.Queue):
             self.init_list_head(lh)
         else:
             with self.block_locks[block_id]:
-                next_block_id = self.get_meta(self.data_blocks[block_id], 'next_block_id')
+                maybe_next_block_id: typing.Union[bytes, int] = self.get_meta(self.data_blocks[block_id], 'next_block_id')
+                if isinstance(maybe_next_block_id, int):
+                    next_block_id: int = maybe_next_block_id
+                else:
+                    raise ValueError("get_first_block internal error: next_block_id is not int.")
             self.set_list_head_field(lh, next_block_id, 'first_block')
             self.set_list_head_field(lh, block_count, 'block_count')
         return block_id
 
     def add_block(self, lh: int, block_id: int):
-        block_count = self.get_list_head_field(lh, 'block_count')
+        block_count: int = self.get_list_head_field(lh, 'block_count')
         if block_count == 0:
             self.set_list_head_field(lh, block_id, 'first_block')
             self.set_list_head_field(lh, block_id, 'last_block')
             self.set_list_head_field(lh, 1, 'block_count')
         
         else:
-            last_block = self.get_list_head_field(lh, 'last_block')
+            last_block: int = self.get_list_head_field(lh, 'last_block')
             with self.block_locks[last_block]:
                 self.set_meta(self.data_blocks[last_block], block_id, 'next_block_id')
             self.set_list_head_field(lh, block_id, 'last_block')
@@ -418,13 +426,14 @@ class ShmQueue(mpq.Queue):
             
         with self.block_locks[block_id]:
             data_block = self.data_blocks[block_id]
-            return \
-                self.get_meta(data_block, 'src_pid'), \
-                self.get_meta(data_block, 'msg_id'), \
-                block_id, \
-                self.get_meta(data_block, 'total_chunks'), \
-                self.get_meta(data_block, 'next_chunk_block_id')
-
+            src_pid: typing.Union[bytes, int] = self.get_meta(data_block, 'src_pid')
+            msg_id: typing.Union[bytes, int] = self.get_meta(data_block, 'msg_id')
+            total_chunks: typing.Union[bytes, int] = self.get_meta(data_block, 'total_chunks')
+            next_chunk_block_id: typing.Union[bytes, int] = self.get_meta(data_block, 'next_chunk_block_id')
+            if isinstance(src_pid, int) and isinstance (msg_id, bytes) and isinstance(total_chunks, int) and isinstance(next_chunk_block_id, int):
+                return src_pid, msg_id, block_id, total_chunks, next_chunk_block_id
+            else:
+                raise ValueError("next_readable_msg: internal error extracting data block metadata.")
 
     # def debug_data_block(self):
     #     for b in self.data_blocks:
@@ -612,7 +621,11 @@ class ShmQueue(mpq.Queue):
                 msg_block_ids.append(next_chunk_block_id)
                 data_block = self.data_blocks[next_chunk_block_id]
                 with self.block_locks[next_chunk_block_id]:
-                    next_chunk_block_id = self.get_meta(data_block, 'next_chunk_block_id')
+                    maybe_next_chunk_block_id: typing.Union[bytes, int] = self.get_meta(data_block, 'next_chunk_block_id')
+                    if isinstance(maybe_next_chunk_block_id, int):
+                        next_chunk_block_id = maybe_next_chunk_block_id
+                    else:
+                        raise ValueError("get: internal error getting next_chunk_block_id")
 
         except Exception:
             # Release the data blocks (losing the message) if we get an
@@ -631,11 +644,23 @@ class ShmQueue(mpq.Queue):
                 chunk_id = block_idx + 1
                 data_block = self.data_blocks[block_id]
                 with self.block_locks[block_id]:
-                    msg_size: int = self.get_meta(data_block, 'msg_size')
+                    maybe_msg_size: typing.Union[bytes, int] = self.get_meta(data_block, 'msg_size')
+                    if isinstance(maybe_msg_size, int):
+                        msg_size: int = maybe_msg_size
+                    else:
+                        raise ValueError("get: internal error getting msg_size")
                     if self.integrity_check:
                         if block_idx == 0:
-                            total_msg_size: int = self.get_meta(data_block, 'total_msg_size')
-                        checksum: int = self.get_meta(data_block, 'checksum')
+                            maybe_total_msg_size: typing.Union[bytes, int] = self.get_meta(data_block, 'total_msg_size')
+                            if isinstance(maybe_total_msg_size, int):
+                                total_msg_size: int = maybe_total_msg_size
+                            else:
+                                raise ValueError("set: internal errpor getting total_msg_size")
+                        maybe_checksum: typing.Union[bytes, int] = self.get_meta(data_block, 'checksum')
+                        if isinstance(maybe_checksum, int):
+                            checksum: int = maybe_checksum
+                        else:
+                            raise ValueError("get: internal error getting checksum")
                     chunk_data: bytes = self.get_data(data_block, msg_size) # This may make a reference, not a deep copy.
                 if self.verbose:
                     print("get: qid=%d src_pid=%d msg_id=%r: chunk_id=%d: block_id=%d msg_size=%d total_chunks=%d." % (self.qid, src_pid, msg_id, chunk_id, block_id, msg_size, total_chunks), file=sys.stderr, flush=True) # ***
