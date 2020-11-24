@@ -209,7 +209,16 @@ class ParallelProcessor(Paralleller):
                                 It defaults to False.
         batch_size (int, optional): Batch size, defaults to 1.
         progress (Callable, optional): Progress inspection. Defaults to None.
-
+        use_shm (bool, optional): When True, and when riunning on Python version 3.8 or later,
+                                use ShmQueue for higher performance.  Defaults to False.
+        enable_collector_queues (bool, optional): When True, create a collector queue for each
+                                processor.  When False, do not allocate collector queues, saving
+                                resources.  Defaults to True.
+        single_mapper_queue (bool, optional): When True, allocate a single mapper queue that will
+                                be shared between the worker processes.  Sending processes can
+                                go to sleep when the mapper queue is full.  When False, each process
+                                gets its own mapper queue, and CPU-intensive polling may be needed to
+                                find a mapper queue which can accept a new request.
 
     Note:
         - Do NOT implement heavy compute-intensive operations in collector, they should be in mapper.
@@ -359,8 +368,12 @@ class ParallelProcessor(Paralleller):
 
     def add_task(self, *args, **kwargs):
         """
-        Add data to one of the mapper queues.
-        (main process, unblocked, using round robin to find next available queue)
+        Add data to one a mapper queue.
+
+        When a single mapper queue is in use, put the process to sleep if the
+        queue is full.  When multiple mapper queues are in use (one per process),
+        use CPU-intensive polling (round-robin processing) to find the next available
+        queue. (main process, blocked or unblocked depending upon single_mapper_queue)
         """
         self.batch_data.append((args, kwargs))
         if self.progress:
@@ -385,7 +398,7 @@ class ParallelProcessor(Paralleller):
 
     def _run(self, idx: int, mapper_queue: mp.Queue, collector_queue: typing.Optional[mp.Queue]):
         """
-        Process’s activity. It handles queue IO and invokes user's mapper handler.
+        Process's activity. It handles queue IO and invokes user's mapper handler.
         (subprocess, blocked, only two queues can be used to communicate with main process)
         """
         with self.mapper(idx) as mapper:
