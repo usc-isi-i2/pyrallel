@@ -208,11 +208,15 @@ class ShmQueue(mpq.Queue):
         self.serializer = dill.loads(self.serializer)
 
     def get_list_head_field(self, lh: int, type_):
-        addr_s, addr_e, ctype = self.__class__.LIST_HEAD_STRUCT.get(type_)
+        addr_s, addr_e, ctype = self.__class__.LIST_HEAD_STRUCT.get(type_, (None, None, None))
+        if addr_s is None or addr_e is None or ctype is None:
+            raise ValueError("get_list_head_field: unrecognized %s" % repr(type_))
         return struct.unpack(ctype, self.list_heads.buf[(self.__class__.LIST_HEAD_SIZE * lh) + addr_s : (self.__class__.LIST_HEAD_SIZE * lh) + addr_e])[0]
 
     def set_list_head_field(self, lh: int, data, type_):
-        addr_s, addr_e, ctype = self.__class__.LIST_HEAD_STRUCT.get(type_)
+        addr_s, addr_e, ctype = self.__class__.LIST_HEAD_STRUCT.get(type_, (None, None, None))
+        if addr_s is None or addr_e is None or ctype is None:
+            raise ValueError("get_list_head_field: unrecognized %s" % repr(type_))
         self.list_heads.buf[(self.__class__.LIST_HEAD_SIZE * lh) + addr_s : (self.__class__.LIST_HEAD_SIZE * lh) + addr_e] = struct.pack(ctype, data)
 
     def get_meta(self, block, type_):
