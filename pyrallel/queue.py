@@ -239,9 +239,10 @@ class ShmQueue(mpq.Queue):
         self.serializer = dill.loads(self.serializer)
 
     def get_list_head_field(self, lh: int, type_: str)->int:
-        """int: Get a field from a mlist head.
+        """int: Get a field from a list head.
+
         Args:
-            lh (int): The index of the list head in the list head shaed memory.
+            lh (int): The index of the list head in the list head shared memory.
             type (str): The name of the list head field."""
         addr_s: typing.Optional[int]
         addr_e: typing.Optional[int]
@@ -263,6 +264,11 @@ class ShmQueue(mpq.Queue):
         self.list_heads.buf[(self.__class__.LIST_HEAD_SIZE * lh) + addr_s : (self.__class__.LIST_HEAD_SIZE * lh) + addr_e] = struct.pack(ctype, data) #type: ignore
 
     def get_meta(self, block: SharedMemory, type_: str)->typing.Union[bytes, int]:
+        """typing.Union[bytes, int]: Get a field from a block's metadata area in shared memory.
+
+        Args:
+            block (SharedMemory): The shared memory for the data block.
+            type_ (str): The name of the metadata field to extract."""
         addr_s: typing.Optional[int]
         addr_e: typing.Optional[int]
         ctype: typing.Optional[str]
@@ -283,6 +289,11 @@ class ShmQueue(mpq.Queue):
         block.buf[addr_s : addr_e] = struct.pack(ctype, data) #type: ignore
 
     def get_data(self, block: SharedMemory, data_size: int)->bytes:
+        """bytes: Get a memoryview of the a shared memory data block.
+
+        Args:
+            block (SharedMemory): The chared memory block.
+            data_size (int): The number of bytes in the returned memoryview slice."""
         return block.buf[self.__class__.META_BLOCK_SIZE:self.__class__.META_BLOCK_SIZE+data_size]
 
     def set_data(self, block: SharedMemory, data: bytes, data_size: int):
@@ -290,14 +301,35 @@ class ShmQueue(mpq.Queue):
         block.buf[self.__class__.META_BLOCK_SIZE:self.__class__.META_BLOCK_SIZE+data_size] = data # type: ignore
 
     def init_list_head(self, lh: int):
+        """Initialize a block list, clearing the block count and setting the first_block
+           and last_block fields to the reserved value that indicates that they are
+           void pointers.
+
+        Args:
+            lh (int): The index of the list head in the list head shared memory area."""
         self.set_list_head_field(lh, 0, 'block_count')
         self.set_list_head_field(lh, self.__class__.RESERVED_BLOCK_ID, 'first_block')
         self.set_list_head_field(lh, self.__class__.RESERVED_BLOCK_ID, 'last_block')
 
     def get_block_count(self, lh: int)->int:
+        """int: Get the count of blocks queued in a block list.
+
+        Args:
+            lh (int): The index of the list head in the list head shared memory area.
+        """
         return self.get_list_head_field(lh, 'block_count')
 
     def get_first_block(self, lh: int)->typing.Optional[int]:
+        """Get the first block on a block list, updating the list head fields.
+
+        Args:
+            lh (int): The index of the list head in the list head shared memory area.
+
+        Returns:
+            None: No block is available
+            int: The block_id of the first available block.
+        """
+
         block_count: int = self.get_block_count(lh)
         if block_count == 0:
             return None
@@ -319,6 +351,11 @@ class ShmQueue(mpq.Queue):
         return block_id
 
     def add_block(self, lh: int, block_id: int):
+        """Add a block to a block list.
+
+        Args:
+            lh (int): The index of the list head in the list head shared memory area.
+        """
         block_count: int = self.get_list_head_field(lh, 'block_count')
         if block_count == 0:
             self.set_list_head_field(lh, block_id, 'first_block')
@@ -333,44 +370,126 @@ class ShmQueue(mpq.Queue):
             self.set_list_head_field(lh, block_count + 1, 'block_count')
                 
     def get_free_block_count(self)->int:
+        """int: Get the number of free blocks."""
         with self.free_list_lock:
             return self.get_block_count(self.__class__.FREE_LIST_HEAD)
 
     def get_first_free_block(self, block: bool, timeout: typing.Optional[float])->typing.Optional[int]:
+        """Get the first free block.
+
+           When using semaphores, optionally block with an optional timeout.  If
+           you choose to block without a timeout, the method will not return until
+           a free block is available.
+
+        Args:
+            block (bool): When True, and when using semaphores, wait until an
+               free block is available or a timeout occurs.
+            timeout (typing.Optional[float]): When block is True and timeout is
+               positive, block for at most timeout seconds attempting to acquire
+               the free block.
+
+        Returns:
+            None: No block is available
+            int: The block_id of the first available block.
+        """
         if self.free_list_semaphore is not None:
             self.free_list_semaphore.acquire(block=block, timeout=timeout)
         with self.free_list_lock:
             return self.get_first_block(self.__class__.FREE_LIST_HEAD)
 
     def add_free_block(self, block_id: int):
+        """Return a block to the free block list.
+
+        Args:
+            block_id (int): The identifier of the block being returned.
+        """
         with self.free_list_lock:
             self.add_block(self.__class__.FREE_LIST_HEAD, block_id)
         if self.free_list_semaphore is not None:
             self.free_list_semaphore.release()
 
     def get_msg_count(self)->int:
+        """int: Get the number of messages on the message list."""
         with self.msg_list_lock:
             return self.get_block_count(self.__class__.MSG_LIST_HEAD)
 
     def get_first_msg(self, block: bool, timeout: typing.Optional[float])->typing.Optional[int]:
+        """Take the first available message, if any, from the available message list.
+
+           When using semaphores, optionally block with an optional timeout.  If
+           you choose to block without a timeout, the method will not return until
+           a free block is available.
+
+        Args:
+            block (bool): When True, and when using semaphores, wait until an
+               message is available or a timeout occurs.
+            timeout (typing.Optional[float]): When block is True and timeout is
+               positive, block for at most timeout seconds attempting to acquire
+               the message.
+
+        Returns:
+            None: No message is available
+            int: The block_id of the first chunk of the first available message.
+        """
         if self.msg_list_semaphore is not None:
             self.msg_list_semaphore.acquire(block=block, timeout=timeout)
         with self.msg_list_lock:
             return self.get_first_block(self.__class__.MSG_LIST_HEAD)
 
     def add_msg(self, block_id: int):
+        """Add a message to the available message list
+
+        Args:
+            block_id (int): The block identifier of the first chunk of the message.
+        """
         with self.msg_list_lock:
             self.add_block(self.__class__.MSG_LIST_HEAD, block_id)
         if self.msg_list_semaphore is not None:
             self.msg_list_semaphore.release()
         
     def generate_msg_id(self)->bytes:
+        """bytes: Generate the next message identifier, but do not consume it.
+
+        Note:
+            Message IDs are assigned independenyly by each process using the queue.
+            They need to be paired with the source process ID to be used to identify
+            a message for debugging.
+        """
         return ("%012x" % (self.mid_counter + 1)).encode('utf-8')
 
     def consume_msg_id(self):
+        """Consume a message identifier.
+
+        Note:
+            Message identifiers are consumed when we are certain that we can process
+            the message.  They will not be consumed if we start to process a message
+            but fail due to a conition such as insufficient free buffers.
+        """
         self.mid_counter += 1
 
     def next_writable_block_id(self, block: bool, timeout: typing.Optional[float], msg_id: bytes, src_pid: int)->int:
+        """int: Get the block ID of the first free block.
+
+        Get the block ID of the first free block, supporting
+        blocking/nonblocking modes and timeouts when blocking, even when
+        semaphores are not being used.  Store int he block's metadata area the
+        message ID for the message we are building and the pid of the process
+        acquiring the block.
+
+        Args:
+            block (bool): When True, and when using semaphores, wait until an
+               free block is available or a timeout occurs.
+            timeout (typing.Optional[float]): When block is True and timeout is
+               positive, block for at most timeout seconds attempting to acquire
+               the free block.
+            msg_id (bytes): The message ID assigned to the message being built.
+            src_pid: The process ID (pid) of the process that is acquiring the block.
+
+        Raises:
+            Full: No block is available.  Full is raised immediately in nonblocking
+               mode, or after the timeout in blocking mode when a timeout is specified.
+
+        """
         looped: bool = False
         loop_cnt: int = 0
         time_start = time.time()
@@ -409,6 +528,30 @@ class ShmQueue(mpq.Queue):
         return block_id
 
     def next_readable_msg(self, block: bool, timeout: typing.Optional[float]=None)->typing.Tuple[int, bytes, int, int, int]:
+        """Get the next available message, with blocking and timeouts.
+
+        This method returns a 5-tuple: the data block and certain metadata.
+        The reason for this complexity is to
+        retrieve the metadata under a single access lock.
+
+        Args:
+            block (bool): When True, and when using semaphores, wait until an
+               free block is available or a timeout occurs.
+            timeout (typing.Optional[float]): When block is True and timeout is
+               positive, block for at most timeout seconds attempting to acquire
+               the free block.
+
+        Returns:
+            src_pid (int): The process iodentifier of the process that originated the message.
+            msg_id (bytes): The messag identifier.
+            block_id (int): The identifier for the first chunk in the message.
+            total_chunks (int): The total number of chunks in the message.
+            next_chunk_block_id (int): The identifier for the next chunk in the message.
+
+        Raises:
+            Empty: no messages are available and either nonblocking mode or a timeout occured.
+            ValueError: An internal error occured in accessing the message's metadata.
+        """
         i = 0
         time_start = time.time()
         while True:
