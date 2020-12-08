@@ -1,12 +1,15 @@
 name: Deploy
-on: tag
+on:
+  push:
+    tags:
+      - '*'
 jobs:
   deploy-to-pypi:
     name: Deploy to pypi
     runs-on: ubuntu-latest
     steps:
       - name: checkout code
-      - uses: actions/checkout@v2
+        uses: actions/checkout@v2
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
