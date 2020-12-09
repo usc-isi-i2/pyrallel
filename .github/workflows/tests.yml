@@ -26,7 +26,7 @@ jobs:
           python -m pytest -v --color=yes --cov pyrallel pyrallel/tests/test_*
       - name: Coverage
         env:
-          GITHUB_TOKEN: ${{ secrets.COVERALLS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # coverage run --omit pyrallel/tests/* -m pytest pyrallel/tests/test_*
           # coverage report
