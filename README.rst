@@ -9,9 +9,9 @@ Yet another easy-to-use python parallel library for humans.
     :target: https://raw.githubusercontent.com/usc-isi-i2/pyrallel/master/LICENSE
     :alt: License
 
-.. image:: https://api.travis-ci.org/usc-isi-i2/pyrallel.svg?branch=master
-    :target: https://travis-ci.org/usc-isi-i2/pyrallel
-    :alt: Travis
+.. image:: https://github.com/usc-isi-i2/pyrallel/workflows/Tests/badge.svg?branch=master
+    :target: https://github.com/usc-isi-i2/pyrallel/actions
+    :alt: Github actions
 
 .. image:: https://coveralls.io/repos/github/usc-isi-i2/pyrallel/badge.svg?branch=master
     :target: https://coveralls.io/github/usc-isi-i2/pyrallel?branch=master
