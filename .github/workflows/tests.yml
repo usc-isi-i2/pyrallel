@@ -23,11 +23,11 @@ jobs:
           pip install coverage coveralls
       - name: Test with pytest
         run: |
-          py.test -v --color=yes --cov pyrallel
+          python -m pytest -v --color=yes --cov pyrallel pyrallel/tests/test_*
       - name: Coverage
         env:
           GITHUB_TOKEN: ${{ secrets.COVERALLS }}
         run: |
-          coverage run --omit tests/** -m pytest tests
-          coverage report
+          # coverage run --omit pyrallel/tests/* -m pytest pyrallel/tests/test_*
+          # coverage report
           coveralls
