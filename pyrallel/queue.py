@@ -10,15 +10,16 @@ import struct
 import sys
 import time
 import typing
-import dill # type: ignore
+import dill  # type: ignore
 import zlib
 
 
 if sys.version_info >= (3, 8):
     from multiprocessing.shared_memory import SharedMemory
-
     __all__ = ['ShmQueue']
 else:
+    from typing import TypeVar
+    SharedMemory = TypeVar('SharedMemory')
     __all__ = []
 
 
